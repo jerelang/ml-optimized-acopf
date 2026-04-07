@@ -422,6 +422,7 @@ def benchmark_command(
             "-o",
         ),
     ] = DEFAULT_BENCHMARK_OUT,
+    plot: bool = True,
 ) -> None:
     import torch
 
@@ -438,7 +439,7 @@ def benchmark_command(
 
     network_names = tuple(cfg.benchmark.network_names) or (cfg.data.network_name,)
     run_name = make_run_name(cfg)
-    result_path = out / f"{run_name}_benchmark.parquet"
+    result_path = out / run_name / f"{run_name}_benchmark.parquet"
 
     frame = run_benchmark(
         network_names=network_names,
