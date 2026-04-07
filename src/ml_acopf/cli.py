@@ -15,7 +15,8 @@ from .learning.dataset import WarmStartDataset
 from .learning.models import VoltageWarmStartActor, VoltageWarmStartCritic, load_actor
 from .learning.ppo import PPOConfig
 from .learning.train import pretrain_actor_supervised, train_ppo
-from .utils import make_run_name
+from .plotting import plot_ppo_history, plot_pretrain_history
+from .utils import make_run_name, print_rich, write_parquet
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -31,24 +32,57 @@ def list_networks_command() -> None:
 
 
 @app.command(
+    name="generate-cases",
+    help="Generate the networks and their baselines and store them as parquet files.",
+)
+def cases_command(
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
+    ] = DEFAULT_CONFIG_PATH,
+) -> None:
+    cfg = load_config(config)
+    info = generate_cases(cfg)
+    typer.echo(json.dumps(info, indent=2))
+
+
+@app.command(
     name="train",
-    help="Pretrain the actor using the offline dataset (for more stable performance) and then train with ppo.",
+    help="Pretrain the actor using the offline dataset and then train with PPO.",
 )
 def train_command(
     config: Annotated[
         Path,
         typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
     ] = DEFAULT_CONFIG_PATH,
+    config_from_actor: Annotated[
+        Path | None,
+        typer.Option("--config-actor", "-ca", exists=True, dir_okay=False, readable=True),
+    ] = None,
     out: Annotated[
         Path,
         typer.Option("--out", "-o"),
     ] = DEFAULT_ACTOR_OUT,
+    plot: bool = True,
     pretrain: bool = True,
 ) -> None:
+    import polars as pl
+    import torch
+
+    from .config import Config
     from .learning.models import save_actor
 
-    cfg = load_config(config)
-    dataset = WarmStartDataset(Path("data") / cfg.data.name)
+    if config_from_actor is not None:
+        checkpoint = torch.load(config_from_actor, map_location="cpu")
+        cfg = Config.model_validate(checkpoint["full_cfg"])
+    else:
+        cfg = load_config(config)
+
+    dataset = WarmStartDataset(
+        cfg.dataset_root,
+        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+    )
+
     actor = VoltageWarmStartActor(
         in_channels=dataset.input_channels,
         hidden_channels=cfg.model.hidden_channels,
@@ -56,8 +90,9 @@ def train_command(
         action_std_init=cfg.model.action_std_init,
         device_type_embedding_dim=cfg.model.device_type_embedding_dim,
     )
+    pretrain_history = None
     if pretrain:
-        pretrain_actor_supervised(
+        pretrain_history = pretrain_actor_supervised(
             actor,
             dataset,
             epochs=cfg.pretrain.epochs,
@@ -78,7 +113,7 @@ def train_command(
         ppo_epochs=cfg.ppo.ppo_epochs,
         max_grad_norm=cfg.ppo.max_grad_norm,
     )
-    agent, history = train_ppo(
+    agent, ppo_history = train_ppo(
         actor,
         critic,
         dataset,
@@ -95,9 +130,23 @@ def train_command(
         actor=agent.actor,
         input_channels=dataset.input_channels,
         cfg=cfg,
-        history=history,
+        history=ppo_history,
         out=out,
     )
+    if pretrain_history:
+        write_parquet(pl.DataFrame(pretrain_history), out / "pretrain_history.parquet")
+    write_parquet(pl.DataFrame(ppo_history), out / "ppo_history.parquet")
+
+    if plot:
+        created: list[Path] = []
+
+        if (out / "pretrain_history.parquet").exists():
+            created.append(plot_pretrain_history(out))
+        if (out / "ppo_history.parquet").exists():
+            created.extend(plot_ppo_history(out))
+
+    for path in created:
+        typer.echo(f"wrote: {path}")
 
 
 @app.command(
@@ -152,7 +201,10 @@ def search_command(
 
     cfg = load_config(config)
     dataset_root = cfg.dataset_root
-    full_dataset = WarmStartDataset(dataset_root=dataset_root)
+    full_dataset = WarmStartDataset(
+        dataset_root=dataset_root,
+        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+    )
 
     case_ids = [full_dataset.case_metadata(i).case_id for i in range(len(full_dataset))]
 
@@ -166,22 +218,26 @@ def search_command(
     train_case_ids = case_ids[:split_index]
     val_case_ids = case_ids[split_index:]
 
-    train_dataset = WarmStartDataset(dataset_root, case_ids=train_case_ids)
-    val_dataset = WarmStartDataset(dataset_root, case_ids=val_case_ids)
+    train_dataset = WarmStartDataset(
+        dataset_root,
+        case_ids=train_case_ids,
+        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+    )
+    val_dataset = WarmStartDataset(
+        dataset_root,
+        case_ids=val_case_ids,
+        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_name = make_run_name(cfg)
     output_dir = out / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Phase 1: supervised search
-
     best_pretrain: BestPretrain | None = None
 
     for hidden_channels in tqdm(
-        cfg.search.hidden_channels,
-        desc="Pretraining search",
-        unit="config",
+        cfg.search.hidden_channels, desc="Pretraining search", unit="config", position=2
     ):
         actor = VoltageWarmStartActor(
             in_channels=full_dataset.input_channels,
@@ -222,8 +278,6 @@ def search_command(
         f"{best_pretrain.hidden_channels} (val_loss={best_pretrain.score:.6f})"
     )
 
-    # Phase 2: PPO search
-
     best_final: BestPPO | None = None
 
     ppo_combinations = list(
@@ -235,9 +289,7 @@ def search_command(
     )
 
     for learning_rate, entropy_weight, nonconvergence_penalty in tqdm(
-        ppo_combinations,
-        desc="PPO search",
-        unit="config",
+        ppo_combinations, desc="PPO search", unit="config", position=2
     ):
         actor = VoltageWarmStartActor(
             in_channels=full_dataset.input_channels,
@@ -350,21 +402,10 @@ def search_command(
 
 
 @app.command(
-    name="generate-cases",
-    help="Generate the networks and their baselines and store them as parquet files.",
+    "benchmark",
+    help="""Run the warm-start benchmark on fresh sampled AC-OPF cases.\n
+    Uses the benchmark and normalization settings stored in the actor checkpoint config.""",
 )
-def cases_command(
-    config: Annotated[
-        Path,
-        typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
-    ] = DEFAULT_CONFIG_PATH,
-):
-    cfg = load_config(config)
-    info = generate_cases(cfg)
-    typer.echo(json.dumps(info, indent=2))
-
-
-@app.command("benchmark", help="Run the warm-start benchmark on fresh sampled AC-OPF cases.")
 def benchmark_command(
     actor_path: Annotated[
         Path,
@@ -374,16 +415,6 @@ def benchmark_command(
             readable=True,
         ),
     ],
-    config: Annotated[
-        Path,
-        typer.Option(
-            "--config",
-            "-c",
-            exists=True,
-            dir_okay=False,
-            readable=True,
-        ),
-    ] = DEFAULT_CONFIG_PATH,
     out: Annotated[
         Path,
         typer.Option(
@@ -391,35 +422,80 @@ def benchmark_command(
             "-o",
         ),
     ] = DEFAULT_BENCHMARK_OUT,
-    network: Annotated[
-        list[str] | None,
-        typer.Option("--network", "-n"),
-    ] = None,
 ) -> None:
     import torch
 
+    from .config import Config
     from .learning.models import WarmStartPredictor
+    from .plotting import plot_benchmark_results
 
-    cfg = load_config(config)
+    checkpoint = torch.load(actor_path, map_location="cpu")
+    cfg = Config.model_validate(checkpoint["full_cfg"])
+
     actor = load_actor(actor_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     predictor = WarmStartPredictor(model=actor, device=device)
-    network_names = tuple(network) if network else (cfg.data.network_name,)
+
+    network_names = tuple(cfg.benchmark.network_names) or (cfg.data.network_name,)
     run_name = make_run_name(cfg)
-    out = out / f"{run_name}_benchmark.parquet"
+    result_path = out / f"{run_name}_benchmark.parquet"
+
     frame = run_benchmark(
         network_names=network_names,
-        n_cases=cfg.data.n_cases,
-        seed=cfg.data.seed,
+        n_cases=cfg.benchmark.n_cases,
+        seed=cfg.benchmark.seed,
         load_scale_min=cfg.perturb.load_scale_min,
         load_scale_max=cfg.perturb.load_scale_max,
         solver=cfg.solver,
+        include_flat=cfg.benchmark.include_flat,
+        include_pf=cfg.benchmark.include_pf,
         predictor=predictor,
-        out=out,
+        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+        out=result_path,
     )
 
-    typer.echo(f"wrote: {out}")
-    typer.echo(summarize_benchmark(frame))
+    summary = summarize_benchmark(frame)
+    summary_out = result_path.with_name(f"{result_path.stem}_summary.parquet")
+    write_parquet(summary, summary_out)
+
+    typer.echo(f"wrote: {result_path}")
+    typer.echo(f"wrote: {summary_out}")
+    print_rich(summary)
+
+    if plot:
+        for path in plot_benchmark_results(result_path):
+            typer.echo(f"wrote: {path}")
+
+
+@app.command("plot-benchmark", help="Create plots for a saved benchmark parquet file.")
+def plot_benchmark_command(
+    benchmark_file: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
+    ],
+) -> None:
+    from .plotting import plot_benchmark_results
+
+    created = plot_benchmark_results(benchmark_file)
+    for path in created:
+        typer.echo(f"wrote: {path}")
+
+
+@app.command("plot-training", help="Create training plots for a saved training run.")
+def plot_training_command(
+    run_dir: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, dir_okay=True, readable=True)
+    ],
+) -> None:
+    created: list[Path] = []
+
+    if (run_dir / "pretrain_history.parquet").exists():
+        created.append(plot_pretrain_history(run_dir))
+    if (run_dir / "ppo_history.parquet").exists():
+        created.extend(plot_ppo_history(run_dir))
+
+    for path in created:
+        typer.echo(f"wrote: {path}")
 
 
 if __name__ == "__main__":

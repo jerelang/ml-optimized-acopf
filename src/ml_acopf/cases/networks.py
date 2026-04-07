@@ -144,6 +144,15 @@ def _ensure_costs(net: pandapowerNet) -> None:
                 cp1_eur_per_mw=10.0 + 0.1 * position,
             )
 
+    if len(net.sgen) > 0:
+        for position, element_index in enumerate(net.sgen.index.to_list()):
+            create_poly_cost(
+                net,
+                int(element_index),
+                "sgen",
+                cp1_eur_per_mw=2.0 + 0.1 * position,
+            )
+
 
 def _ensure_opf_ready(net: pandapowerNet) -> pandapowerNet:
     _ensure_bus_constraints(net)

@@ -18,6 +18,7 @@ from .cases.generate import (
 from .cases.networks import build_network, export_static_tables
 from .config import SolverConfig
 from .solver.io import (
+    SolveStats,
     WarmStartPayload,
     export_bus_warmstart,
     export_device_metadata,
@@ -55,9 +56,6 @@ WARMSTART_BENCHMARK_SCHEMA = pl.Schema(
     }
 )
 
-pl.Config.set_tbl_cols(-1)
-pl.Config.set_tbl_width_chars(10_000)
-
 
 class WarmStartPredictor(Protocol):
     name: str
@@ -76,6 +74,7 @@ def run_benchmark(
     include_flat: bool = True,
     include_pf: bool = True,
     predictor: WarmStartPredictor | None = None,
+    max_voltage_angle_deg: float = 60.0,
     out: Path | None = None,
 ) -> pl.DataFrame:
     unique_network_names = tuple(dict.fromkeys(network_names))
@@ -120,18 +119,26 @@ def run_benchmark(
             if include_pf:
                 net_pf = copy.deepcopy(perturbed_net)
                 started_at = time.perf_counter()
-                pp.runpp(
-                    net_pf,
-                    calculate_voltage_angles=solver.calculate_voltage_angles,
-                    check_connectivity=solver.check_connectivity,
-                    init="auto",
-                )
-                prep_time_s = time.perf_counter() - started_at
-                warmstart = WarmStartPayload(
-                    bus=export_bus_warmstart(net_pf, case_id),
-                    device=export_device_warmstart(net_pf, case_id),
-                )
-                stats = solve_ac_opf(net_pf, solver, warmstart=warmstart)
+                try:
+                    pp.runpp(
+                        net_pf,
+                        calculate_voltage_angles=solver.calculate_voltage_angles,
+                        check_connectivity=solver.check_connectivity,
+                        init="auto",
+                    )
+                    prep_time_s = time.perf_counter() - started_at
+                    warmstart = WarmStartPayload(
+                        bus=export_bus_warmstart(net_pf, case_id),
+                        device=export_device_warmstart(net_pf, case_id),
+                    )
+                    stats = solve_ac_opf(net_pf, solver, warmstart=warmstart)
+                except Exception as error:
+                    prep_time_s = time.perf_counter() - started_at
+                    stats = _failed_stats(
+                        prefix="PF warm-start failed",
+                        error=error,
+                    )
+
                 rows.append(
                     _warmstart_row(
                         case_id=case_id,
@@ -149,19 +156,26 @@ def run_benchmark(
             if predictor is not None:
                 from .learning.dataset import build_graph_data_from_case
 
-                load_inputs = export_load_inputs(perturbed_net, case_id, profile)
-                graph = build_graph_data_from_case(
-                    buses_static=buses_static,
-                    edges_static=edges_static,
-                    load_inputs=load_inputs,
-                    device_metadata=export_device_metadata(perturbed_net),
-                )
-
                 started_at = time.perf_counter()
-                warmstart = predictor.predict(graph, case_id)
-                prep_time_s = time.perf_counter() - started_at
+                try:
+                    load_inputs = export_load_inputs(perturbed_net, case_id, profile)
+                    graph = build_graph_data_from_case(
+                        buses_static=buses_static,
+                        edges_static=edges_static,
+                        load_inputs=load_inputs,
+                        device_metadata=export_device_metadata(perturbed_net),
+                        max_voltage_angle_deg=max_voltage_angle_deg,
+                    )
+                    warmstart = predictor.predict(graph, case_id)
+                    prep_time_s = time.perf_counter() - started_at
+                    stats = solve_ac_opf(copy.deepcopy(perturbed_net), solver, warmstart=warmstart)
+                except Exception as error:
+                    prep_time_s = time.perf_counter() - started_at
+                    stats = _failed_stats(
+                        prefix=f"{predictor.name} warm-start failed",
+                        error=error,
+                    )
 
-                stats = solve_ac_opf(copy.deepcopy(perturbed_net), solver, warmstart=warmstart)
                 rows.append(
                     _warmstart_row(
                         case_id=case_id,
@@ -220,7 +234,7 @@ def _warmstart_row(
     total_q_mvar: float,
     method: str,
     prep_time_s: float,
-    stats,
+    stats: SolveStats,
 ) -> dict[str, object]:
     return {
         "case_id": case_id,
@@ -240,3 +254,11 @@ def _warmstart_row(
         "iterations": stats.iterations,
         "error": stats.error,
     }
+
+
+def _failed_stats(*, prefix: str, error: Exception) -> SolveStats:
+    return SolveStats(
+        success=False,
+        wall_time_s=0.0,
+        error=f"{prefix}: {type(error).__name__}: {error}",
+    )

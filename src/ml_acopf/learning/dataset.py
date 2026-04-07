@@ -12,9 +12,7 @@ from torch_geometric.data import Data
 
 from ..solver.io import BUS_WARMSTART_SCHEMA, DEVICE_WARMSTART_SCHEMA
 
-DEFAULT_VA_MIN_DEG = -60.0
-DEFAULT_VA_MAX_DEG = 60.0
-DEFAULT_ANGLE_MARGIN_DEG = 5.0
+DEFAULT_MAX_VOLTAGE_ANGLE_DEG = 60.0
 
 DEVICE_TYPE_TO_ID = {"gen": 0, "ext_grid": 1, "sgen": 2}
 ID_TO_DEVICE_TYPE = {value: key for key, value in DEVICE_TYPE_TO_ID.items()}
@@ -60,7 +58,7 @@ class WarmStartDataset(Dataset[Data]):
         dataset_root: Path | str,
         *,
         case_ids: list[str] | None = None,
-        angle_bounds: tuple[float, float] | None = None,
+        max_voltage_angle_deg: float = DEFAULT_MAX_VOLTAGE_ANGLE_DEG,
     ) -> None:
         self.tables = load_case_tables(dataset_root)
 
@@ -87,7 +85,7 @@ class WarmStartDataset(Dataset[Data]):
 
         buses_static = self.tables.buses_static.sort("bus_index")
         edges_static = self.tables.edges_static
-        resolved_angle_bounds = angle_bounds or _infer_angle_bounds(self.tables.bus_targets)
+        self._angle_bounds = _symmetric_angle_bounds(max_voltage_angle_deg)
 
         self._graphs: tuple[Data, ...] = tuple(
             build_graph_data_from_case(
@@ -96,7 +94,7 @@ class WarmStartDataset(Dataset[Data]):
                 load_inputs=self._load_inputs_by_case.get(item.case_id, pl.DataFrame()),
                 bus_targets=self._bus_targets_by_case.get(item.case_id),
                 dispatch_targets=self._dispatch_targets_by_case.get(item.case_id),
-                angle_bounds=resolved_angle_bounds,
+                max_voltage_angle_deg=max_voltage_angle_deg,
             )
             for item in self._metadata
         )
@@ -105,13 +103,13 @@ class WarmStartDataset(Dataset[Data]):
         return len(self._graphs)
 
     def __getitem__(self, index: int) -> Data:
-        return self._graphs[index]
+        return self._graphs[index].clone()
 
     def case_metadata(self, index: int) -> CaseMetadata:
         return self._metadata[index]
 
     def graph_for_case_id(self, case_id: str) -> Data:
-        return self._graphs[self._index_by_case[case_id]]
+        return self._graphs[self._index_by_case[case_id]].clone()
 
     def load_inputs_for_case(self, case_id: str) -> pl.DataFrame:
         return self._load_inputs_by_case.get(case_id, pl.DataFrame())
@@ -122,6 +120,10 @@ class WarmStartDataset(Dataset[Data]):
             raise ValueError("Dataset is empty.")
         return int(self._graphs[0].x.size(-1))
 
+    @property
+    def angle_bounds(self) -> tuple[float, float]:
+        return self._angle_bounds
+
 
 def build_graph_data_from_case(
     *,
@@ -131,7 +133,7 @@ def build_graph_data_from_case(
     bus_targets: pl.DataFrame | None = None,
     dispatch_targets: pl.DataFrame | None = None,
     device_metadata: pl.DataFrame | None = None,
-    angle_bounds: tuple[float, float] | None = None,
+    max_voltage_angle_deg: float = DEFAULT_MAX_VOLTAGE_ANGLE_DEG,
 ) -> Data:
     buses = buses_static.sort("bus_index")
     bus_ids = buses["bus_index"].to_list()
@@ -195,7 +197,7 @@ def build_graph_data_from_case(
         dtype=torch.float32,
     )
 
-    va_min, va_max = angle_bounds or _infer_angle_bounds(bus_targets)
+    va_min, va_max = _symmetric_angle_bounds(max_voltage_angle_deg)
     va_lower = torch.full((len(bus_ids),), float(va_min), dtype=torch.float32)
     va_upper = torch.full((len(bus_ids),), float(va_max), dtype=torch.float32)
 
@@ -519,22 +521,6 @@ def _prepare_device_table(
     return pl.DataFrame()
 
 
-def _infer_angle_bounds(bus_targets: pl.DataFrame | None) -> tuple[float, float]:
-    if bus_targets is None or bus_targets.is_empty() or "va_degree" not in bus_targets.columns:
-        return DEFAULT_VA_MIN_DEG, DEFAULT_VA_MAX_DEG
-
-    summary = bus_targets.select(
-        pl.col("va_degree").drop_nulls().min().alias("min_va"),
-        pl.col("va_degree").drop_nulls().max().alias("max_va"),
-    )
-
-    min_value = summary.item(0, "min_va")
-    max_value = summary.item(0, "max_va")
-
-    if min_value is None or max_value is None:
-        return DEFAULT_VA_MIN_DEG, DEFAULT_VA_MAX_DEG
-
-    return (
-        float(min_value) - DEFAULT_ANGLE_MARGIN_DEG,
-        float(max_value) + DEFAULT_ANGLE_MARGIN_DEG,
-    )
+def _symmetric_angle_bounds(max_voltage_angle_deg: float) -> tuple[float, float]:
+    max_angle = float(max_voltage_angle_deg)
+    return -max_angle, max_angle

@@ -1,9 +1,9 @@
 [data]
-name = "case14_test"
-network_name = "case14"
-n_cases = 2
+name = "case30_standard"
+network_name = "case30"
+n_cases = 50
 seed = 123
-max_attempts_multiplier = 2
+max_attempts_multiplier = 10
 
 [perturb]
 load_scale_min = 0.90
@@ -28,19 +28,19 @@ device_type_embedding_dim = 4
 action_std_init = 0.05
 
 [pretrain]
-epochs = 5
+epochs = 100
 batch_size = 8
 learning_rate = 1e-3
 weight_decay = 0.0
 
 [ppo]
-updates = 5
+updates = 100
 rollout_size = 32
 learning_rate = 3e-4
 clip_ratio = 0.2
 value_loss_weight = 0.5
 entropy_weight = 0.01
-ppo_epochs = 4
+ppo_epochs = 8
 max_grad_norm = 1.0
 nonconvergence_penalty = 10.0
 seed = 123
@@ -50,13 +50,13 @@ max_voltage_angle_deg = 60.0
 
 [search]
 hidden_channels = [64, 128, 256, 512]
-ppo_learning_rate = [5e-4, 3e-4, 1e-4]
-ppo_entropy_weight = [1e-2, 1e-3]
-nonconvergence_penalty = [10, 12, 15]
+ppo_learning_rate = [5e-4, 3e-4]
+ppo_entropy_weight = [1e-2]
+nonconvergence_penalty = [10]
 
 [benchmark]
-network_names = ["case14"]
-n_cases = 10
+network_names = ["case30"]
+n_cases = 300
 seed = 123
 include_flat = true
 include_pf = true

@@ -19,7 +19,7 @@ jobs:
               with:
                     enable-cache: true
             - name: Sync dependencies
-              run: uv sync --group dev --frozen
+              run: uv sync --group dev
             - name: Ruff
               run: uv run ruff check .
             - name: Type check

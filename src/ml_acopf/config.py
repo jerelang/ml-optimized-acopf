@@ -56,37 +56,76 @@ class SolverConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    hidden_channels: int = 128
-    dropout: float = 0.0
-    device_type_embedding_dim: int = 4
-    action_std_init: float = 0.05
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hidden_channels: int = Field(default=128, gt=0)
+    dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    device_type_embedding_dim: int = Field(default=4, gt=0)
+    action_std_init: float = Field(default=0.05, gt=0.0)
 
 
 class PretrainConfig(BaseModel):
-    epochs: int = 50
-    batch_size: int = 8
-    learning_rate: float = 1e-3
-    weight_decay: float = 0.0
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    epochs: int = Field(default=50, gt=0)
+    batch_size: int = Field(default=8, gt=0)
+    learning_rate: float = Field(default=1e-3, gt=0.0)
+    weight_decay: float = Field(default=0.0, ge=0.0)
 
 
 class PpoTrainConfig(BaseModel):
-    updates: int = 100
-    rollout_size: int = 32
-    learning_rate: float = 3e-4
-    clip_ratio: float = 0.2
-    value_loss_weight: float = 0.5
-    entropy_weight: float = 0.01
-    ppo_epochs: int = 4
-    max_grad_norm: float = 1.0
-    nonconvergence_penalty: float = 10.0
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    updates: int = Field(default=100, gt=0)
+    rollout_size: int = Field(default=32, gt=0)
+    learning_rate: float = Field(default=3e-4, gt=0.0)
+    clip_ratio: float = Field(default=0.2, ge=0.0, le=1.0)
+    value_loss_weight: float = Field(default=0.5, ge=0.0)
+    entropy_weight: float = Field(default=0.01, ge=0.0)
+    ppo_epochs: int = Field(default=4, gt=0)
+    max_grad_norm: float = Field(default=1.0, gt=0.0)
+    nonconvergence_penalty: float = Field(default=10.0, ge=0.0)
     seed: int = 123
 
 
+class NormalizationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_voltage_angle_deg: float = Field(default=60.0, gt=0.0)
+
+    @property
+    def angle_bounds(self) -> tuple[float, float]:
+        max_angle = float(self.max_voltage_angle_deg)
+        return -max_angle, max_angle
+
+
 class SearchConfig(BaseModel):
-    hidden_channels: list[int] = [64, 128, 256, 512]
-    ppo_learning_rate: list[float] = [5e-4, 3e-4, 1e-4]
-    ppo_entropy_weight: list[float] = [1e-2, 1e-3]
-    nonconvergence_penalty: list[int] = [10, 12, 15]
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hidden_channels: list[int] = Field(default_factory=lambda: [64, 128, 256, 512])
+    ppo_learning_rate: list[float] = Field(default_factory=lambda: [5e-4, 3e-4, 1e-4])
+    ppo_entropy_weight: list[float] = Field(default_factory=lambda: [1e-2, 1e-3])
+    nonconvergence_penalty: list[float] = Field(default_factory=lambda: [10.0, 12.0, 15.0])
+
+    @field_validator(
+        "hidden_channels", "ppo_learning_rate", "ppo_entropy_weight", "nonconvergence_penalty"
+    )
+    @classmethod
+    def validate_search_grid(cls, value: list[float] | list[int]) -> list[float] | list[int]:
+        if not value:
+            raise ValueError("search grids must not be empty.")
+        return value
+
+
+class BenchmarkConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    network_names: list[NetworkName] = Field(default_factory=list)
+    n_cases: int = Field(default=100, gt=0)
+    seed: int = 123
+    include_flat: bool = True
+    include_pf: bool = True
+    create_plots: bool = True
 
 
 class Config(BaseModel):
@@ -98,7 +137,9 @@ class Config(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     pretrain: PretrainConfig = Field(default_factory=PretrainConfig)
     ppo: PpoTrainConfig = Field(default_factory=PpoTrainConfig)
+    normalization: NormalizationConfig = Field(default_factory=NormalizationConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    benchmark: BenchmarkConfig = Field(default_factory=BenchmarkConfig)
 
     @property
     def dataset_root(self) -> Path:

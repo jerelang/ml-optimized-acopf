@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 
 import polars as pl
+from rich.console import Console
+from rich.table import Table
 
 from .config import Config
 
@@ -54,3 +56,12 @@ def optional_string(value: object) -> str | None:
 
 def make_run_name(cfg: Config) -> str:
     return f"{cfg.data.name}_n{cfg.data.network_name}_seed{cfg.data.seed}"
+
+
+def print_rich(df: pl.DataFrame):
+    table = Table(show_header=True, header_style="bold cyan")
+    for col in df.columns:
+        table.add_column(col, justify="right")
+    for row in df.iter_rows():
+        table.add_row(*[str(v) for v in row])
+    Console().print(table)
