@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import juliacall  # noqa: F401
 import polars as pl
 
 from ml_acopf.cases.generate import generate_cases

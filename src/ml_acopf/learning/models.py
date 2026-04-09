@@ -4,7 +4,6 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-import juliacall  # noqa: F401
 import torch
 from torch import Tensor, nn
 from torch.distributions import Normal

@@ -7,16 +7,11 @@ from typing import Annotated
 
 import typer
 
-from .benchmark import run_benchmark, summarize_benchmark
-from .cases.generate import generate_cases
-from .cases.networks import list_supported_networks
-from .config import load_config
-from .learning.dataset import WarmStartDataset
-from .learning.models import VoltageWarmStartActor, VoltageWarmStartCritic, load_actor
-from .learning.ppo import PPOConfig
-from .learning.train import pretrain_actor_supervised, train_ppo
-from .plotting import plot_ppo_history, plot_pretrain_history
-from .utils import make_run_name, print_rich, write_parquet
+def ensure_julia_ready() -> None:
+    import juliacall
+    from juliacall import Main as jl
+
+    jl.seval("using Ipopt, PowerModels, JSON, JuMP, PandaModels")
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -28,6 +23,8 @@ DEFAULT_SEARCH_VALIDATE_OUT = Path("outputs/search/")
 
 @app.command("list-networks", help="List the bundled benchmark networks.")
 def list_networks_command() -> None:
+    from .cases.networks import list_supported_networks
+
     typer.echo("\n".join(list_supported_networks()))
 
 
@@ -41,6 +38,9 @@ def cases_command(
         typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
     ] = DEFAULT_CONFIG_PATH,
 ) -> None:
+    ensure_julia_ready()
+    from .cases.generate import generate_cases
+    from .config import load_config
     cfg = load_config(config)
     info = generate_cases(cfg)
     typer.echo(json.dumps(info, indent=2))
@@ -66,11 +66,21 @@ def train_command(
     plot: bool = True,
     pretrain: bool = True,
 ) -> None:
+    ensure_julia_ready()
     import polars as pl
     import torch
 
-    from .config import Config
-    from .learning.models import save_actor
+    from .config import Config, load_config
+    from .learning.dataset import WarmStartDataset
+    from .learning.models import (
+        VoltageWarmStartActor,
+        VoltageWarmStartCritic,
+        save_actor,
+    )
+    from .learning.ppo import PPOConfig
+    from .learning.train import pretrain_actor_supervised, train_ppo
+    from .plotting import plot_ppo_history, plot_pretrain_history
+    from .utils import make_run_name, write_parquet
 
     if config_from_actor is not None:
         checkpoint = torch.load(config_from_actor, map_location="cpu")
@@ -163,14 +173,28 @@ def search_command(
         typer.Option("--out", "-o"),
     ] = DEFAULT_SEARCH_VALIDATE_OUT,
 ) -> None:
+    ensure_julia_ready()
     import random
     from itertools import product
 
     import torch
     from tqdm import tqdm
 
-    from .learning.models import save_actor
-    from .learning.train import evaluate_policy, evaluate_supervised_actor
+    from .config import load_config
+    from .learning.dataset import WarmStartDataset
+    from .learning.models import (
+        VoltageWarmStartActor,
+        VoltageWarmStartCritic,
+        save_actor,
+    )
+    from .learning.ppo import PPOConfig
+    from .learning.train import (
+        evaluate_policy,
+        evaluate_supervised_actor,
+        pretrain_actor_supervised,
+        train_ppo,
+    )
+    from .utils import make_run_name
 
     @dataclass(slots=True)
     class BestPretrain:
@@ -230,6 +254,7 @@ def search_command(
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    typer.echo(device)
     run_name = make_run_name(cfg)
     output_dir = out / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -424,11 +449,15 @@ def benchmark_command(
     ] = DEFAULT_BENCHMARK_OUT,
     plot: bool = True,
 ) -> None:
+    ensure_julia_ready()
+
     import torch
 
+    from .benchmark import run_benchmark, summarize_benchmark
     from .config import Config
-    from .learning.models import WarmStartPredictor
+    from .learning.models import WarmStartPredictor, load_actor
     from .plotting import plot_benchmark_results
+    from .utils import make_run_name, print_rich, write_parquet
 
     checkpoint = torch.load(actor_path, map_location="cpu")
     cfg = Config.model_validate(checkpoint["full_cfg"])
@@ -488,6 +517,8 @@ def plot_training_command(
         Path, typer.Argument(exists=True, file_okay=False, dir_okay=True, readable=True)
     ],
 ) -> None:
+    from .plotting import plot_ppo_history, plot_pretrain_history
+
     created: list[Path] = []
 
     if (run_dir / "pretrain_history.parquet").exists():

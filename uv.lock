@@ -1065,6 +1065,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "juliacall" },
+    { name = "matplotlib" },
     { name = "numba" },
     { name = "numpy" },
     { name = "pandapower", extra = ["pandamodels"] },
@@ -1090,7 +1091,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "juliacall", specifier = ">=0.9" },
+    { name = "juliacall", specifier = ">=0.9.31" },
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "numba", specifier = ">=0.65.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandapower", extras = ["pandamodels"], specifier = ">=3.4.0" },

@@ -5,7 +5,7 @@ description = "Baseline data generation and benchmarking for PandaModels AC-OPF 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "juliacall>=0.9",
+  "juliacall>=0.9.31",
   "matplotlib>=3.8",
   "numpy>=1.26",
   "pandapower[pandamodels]>=3.4.0",

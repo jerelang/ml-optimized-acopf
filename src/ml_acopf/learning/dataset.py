@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import juliacall  # noqa: F401
 import polars as pl
 import torch
 from torch import Tensor

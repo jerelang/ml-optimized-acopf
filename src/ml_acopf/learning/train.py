@@ -3,7 +3,6 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-import juliacall  # noqa: F401
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Batch
