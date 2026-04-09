@@ -7,11 +7,12 @@ from typing import Annotated
 
 import typer
 
+
 def ensure_julia_ready() -> None:
-    import juliacall
     from juliacall import Main as jl
 
     jl.seval("using Ipopt, PowerModels, JSON, JuMP, PandaModels")
+
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -41,6 +42,7 @@ def cases_command(
     ensure_julia_ready()
     from .cases.generate import generate_cases
     from .config import load_config
+
     cfg = load_config(config)
     info = generate_cases(cfg)
     typer.echo(json.dumps(info, indent=2))
@@ -64,7 +66,6 @@ def train_command(
         typer.Option("--out", "-o"),
     ] = DEFAULT_ACTOR_OUT,
     plot: bool = True,
-    pretrain: bool = True,
 ) -> None:
     ensure_julia_ready()
     import polars as pl
@@ -100,16 +101,26 @@ def train_command(
         action_std_init=cfg.model.action_std_init,
         device_type_embedding_dim=cfg.model.device_type_embedding_dim,
     )
-    pretrain_history = None
-    if pretrain:
-        pretrain_history = pretrain_actor_supervised(
-            actor,
-            dataset,
-            epochs=cfg.pretrain.epochs,
-            batch_size=cfg.pretrain.batch_size,
-            learning_rate=cfg.pretrain.learning_rate,
-            weight_decay=cfg.pretrain.weight_decay,
-        )
+    pretrain_history = pretrain_actor_supervised(
+        actor,
+        dataset,
+        epochs=cfg.pretrain.epochs,
+        batch_size=cfg.pretrain.batch_size,
+        learning_rate=cfg.pretrain.learning_rate,
+        weight_decay=cfg.pretrain.weight_decay,
+    )
+    run_name = make_run_name(cfg)
+    out = out / run_name
+    out.mkdir(parents=True, exist_ok=True)
+    save_actor(
+        actor=actor,
+        input_channels=dataset.input_channels,
+        cfg=cfg,
+        history=pretrain_history,
+        out=out,
+    )
+    write_parquet(pl.DataFrame(pretrain_history), out / "pretrain_history.parquet")
+
     critic = VoltageWarmStartCritic(
         in_channels=dataset.input_channels,
         hidden_channels=cfg.model.hidden_channels,
@@ -133,9 +144,6 @@ def train_command(
         rollout_size=cfg.ppo.rollout_size,
         seed=cfg.ppo.seed,
     )
-    run_name = make_run_name(cfg)
-    out = out / run_name
-    out.mkdir(parents=True, exist_ok=True)
     save_actor(
         actor=agent.actor,
         input_channels=dataset.input_channels,
@@ -143,8 +151,6 @@ def train_command(
         history=ppo_history,
         out=out,
     )
-    if pretrain_history:
-        write_parquet(pl.DataFrame(pretrain_history), out / "pretrain_history.parquet")
     write_parquet(pl.DataFrame(ppo_history), out / "ppo_history.parquet")
 
     if plot:
@@ -155,8 +161,8 @@ def train_command(
         if (out / "ppo_history.parquet").exists():
             created.extend(plot_ppo_history(out))
 
-    for path in created:
-        typer.echo(f"wrote: {path}")
+        for path in created:
+            typer.echo(f"wrote: {path}")
 
 
 @app.command(
