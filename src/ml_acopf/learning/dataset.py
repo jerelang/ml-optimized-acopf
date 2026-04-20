@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import polars as pl
 import torch
@@ -30,9 +31,12 @@ class CaseMetadata:
 @dataclass(frozen=True, slots=True)
 class CaseTables:
     cases: pl.DataFrame
+    cases_all: pl.DataFrame
     buses_static: pl.DataFrame
     edges_static: pl.DataFrame
+    device_metadata: pl.DataFrame
     load_inputs: pl.DataFrame
+    load_inputs_all: pl.DataFrame
     bus_targets: pl.DataFrame
     dispatch_targets: pl.DataFrame
 
@@ -41,11 +45,31 @@ def load_case_tables(dataset_root: Path | str) -> CaseTables:
     root = Path(dataset_root)
     baseline_dir = root if root.name == "baseline" else root / "baseline"
 
+    cases = pl.read_parquet(baseline_dir / "cases.parquet")
+    load_inputs = pl.read_parquet(baseline_dir / "load_inputs.parquet")
+
+    attempted_cases_path = baseline_dir / "attempted_cases.parquet"
+    attempted_load_inputs_path = baseline_dir / "attempted_load_inputs.parquet"
+    device_metadata_path = baseline_dir / "device_metadata.parquet"
+
+    cases_all = pl.read_parquet(attempted_cases_path) if attempted_cases_path.exists() else cases
+    load_inputs_all = (
+        pl.read_parquet(attempted_load_inputs_path)
+        if attempted_load_inputs_path.exists()
+        else load_inputs
+    )
+    device_metadata = (
+        pl.read_parquet(device_metadata_path) if device_metadata_path.exists() else pl.DataFrame()
+    )
+
     return CaseTables(
-        cases=pl.read_parquet(baseline_dir / "cases.parquet"),
+        cases=cases,
+        cases_all=cases_all,
         buses_static=pl.read_parquet(baseline_dir / "buses_static.parquet"),
         edges_static=pl.read_parquet(baseline_dir / "edges_static.parquet"),
-        load_inputs=pl.read_parquet(baseline_dir / "load_inputs.parquet"),
+        device_metadata=device_metadata,
+        load_inputs=load_inputs,
+        load_inputs_all=load_inputs_all,
         bus_targets=pl.read_parquet(baseline_dir / "bus_targets.parquet"),
         dispatch_targets=pl.read_parquet(baseline_dir / "dispatch_targets.parquet"),
     )
@@ -58,10 +82,20 @@ class WarmStartDataset(Dataset[Data]):
         *,
         case_ids: list[str] | None = None,
         max_voltage_angle_deg: float = DEFAULT_MAX_VOLTAGE_ANGLE_DEG,
+        case_source: Literal["converged", "all"] = "converged",
     ) -> None:
+        self.dataset_root = Path(dataset_root)
+        self.case_source = case_source
         self.tables = load_case_tables(dataset_root)
 
-        cases_sorted = self.tables.cases.sort("sample_index").select(
+        if case_source == "converged":
+            cases_source = self.tables.cases
+            load_inputs_source = self.tables.load_inputs
+        elif case_source == "all":
+            cases_source = self.tables.cases_all
+            load_inputs_source = self.tables.load_inputs_all
+
+        cases_sorted = cases_source.sort("sample_index").select(
             "case_id",
             "network_name",
             "sample_index",
@@ -78,13 +112,17 @@ class WarmStartDataset(Dataset[Data]):
         )
 
         self._index_by_case = {item.case_id: i for i, item in enumerate(self._metadata)}
-        self._load_inputs_by_case = _partition_by_case(self.tables.load_inputs)
+        self._load_inputs_by_case = _partition_by_case(load_inputs_source)
         self._bus_targets_by_case = _partition_by_case(self.tables.bus_targets)
         self._dispatch_targets_by_case = _partition_by_case(self.tables.dispatch_targets)
 
         buses_static = self.tables.buses_static.sort("bus_index")
         edges_static = self.tables.edges_static
         self._angle_bounds = _symmetric_angle_bounds(max_voltage_angle_deg)
+
+        shared_device_metadata = (
+            self.tables.device_metadata if not self.tables.device_metadata.is_empty() else None
+        )
 
         self._graphs: tuple[Data, ...] = tuple(
             build_graph_data_from_case(
@@ -93,6 +131,7 @@ class WarmStartDataset(Dataset[Data]):
                 load_inputs=self._load_inputs_by_case.get(item.case_id, pl.DataFrame()),
                 bus_targets=self._bus_targets_by_case.get(item.case_id),
                 dispatch_targets=self._dispatch_targets_by_case.get(item.case_id),
+                device_metadata=shared_device_metadata,
                 max_voltage_angle_deg=max_voltage_angle_deg,
             )
             for item in self._metadata
@@ -245,7 +284,8 @@ def build_graph_data_from_case(
             va_lower,
             va_upper,
         )
-
+    else:
+        data_kwargs["y_bus"] = torch.zeros((len(bus_ids), 2), dtype=torch.float32)
     prepared_device_table = _prepare_device_table(dispatch_targets, device_metadata)
 
     if not prepared_device_table.is_empty():
@@ -316,7 +356,7 @@ def build_graph_data_from_case(
                 }
             )
 
-            if dispatch_targets is not None:
+            if dispatch_targets is not None and not dispatch_targets.is_empty():
                 if devices_joined["p_mw"].null_count() or devices_joined["q_mvar"].null_count():
                     raise ValueError("Incomplete device targets")
 
@@ -330,6 +370,11 @@ def build_graph_data_from_case(
                     device_p_upper,
                     device_q_lower,
                     device_q_upper,
+                )
+            else:
+                data_kwargs["y_device"] = torch.zeros(
+                    (devices_joined.height, 2),
+                    dtype=torch.float32,
                 )
         else:
             data_kwargs.update(_empty_device_tensors())
@@ -348,6 +393,7 @@ def _empty_device_tensors() -> dict[str, Tensor]:
         "device_p_upper": torch.empty((0,), dtype=torch.float32),
         "device_q_lower": torch.empty((0,), dtype=torch.float32),
         "device_q_upper": torch.empty((0,), dtype=torch.float32),
+        "y_device": torch.empty((0, 2), dtype=torch.float32),
     }
 
 

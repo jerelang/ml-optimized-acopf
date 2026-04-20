@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import platform
 from pathlib import Path
+from typing import Literal
 
 import polars as pl
 from rich.console import Console
@@ -55,7 +57,7 @@ def optional_string(value: object) -> str | None:
 
 
 def make_run_name(cfg: Config) -> str:
-    return f"{cfg.data.name}_n{cfg.data.network_name}_seed{cfg.data.seed}"
+    return f"{cfg.data.name}_seed{cfg.data.seed}"
 
 
 def print_rich(df: pl.DataFrame):
@@ -65,3 +67,15 @@ def print_rich(df: pl.DataFrame):
     for row in df.iter_rows():
         table.add_row(*[str(v) for v in row])
     Console().print(table)
+
+
+OsName = Literal["linux", "macos"]
+
+
+def detect_os() -> OsName:
+    system = platform.system()
+    if system == "Linux":
+        return "linux"
+    if system == "Darwin":
+        return "macos"
+    raise RuntimeError(f"Unsupported platform: {system}")

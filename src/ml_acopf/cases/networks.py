@@ -1,168 +1,25 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import cast
+from functools import cache
+from pathlib import Path
 
-import pandapower.networks as pn
 import polars as pl
 from pandapower.auxiliary import pandapowerNet
-from pandapower.create import create_poly_cost
+from pandapower.converter.matpower import from_mpc
 
 from ..utils import optional_string
 
-DEFAULT_BUS_MIN_VM_PU = 0.95
-DEFAULT_BUS_MAX_VM_PU = 1.05
-DEFAULT_REACTIVE_LIMIT_MVAR = 1e4
-DEFAULT_SLACK_ACTIVE_LIMIT_MW = 1e4
-DEFAULT_MAX_LOADING_PERCENT = 100.0
-
-NetworkBuilder = Callable[[], pandapowerNet]
-
-NETWORK_BUILDERS: dict[str, NetworkBuilder] = {
-    "case14": cast(NetworkBuilder, pn.case14),
-    "case30": cast(NetworkBuilder, pn.case30),
-    "case57": cast(NetworkBuilder, pn.case57),
-    "case118": cast(NetworkBuilder, pn.case118),
-    "case300": cast(NetworkBuilder, pn.case300),
+CASE_FILES: dict[str, str] = {
+    "case14": "pglib_opf_case14_ieee.m",
+    "case30": "pglib_opf_case30_ieee.m",
+    "case57": "pglib_opf_case57_ieee.m",
+    "case118": "pglib_opf_case118_ieee.m",
+    "case300": "pglib_opf_case300_ieee.m",
+    "case118_sad": "pglib_opf_case118_ieee_sad.m",
+    "case118_api": "pglib_opf_case118_ieee_api.m",
 }
 
-
-def _fill_missing_scalar(table, column: str, value: object) -> None:
-    if column not in table.columns:
-        table[column] = value
-        return
-
-    missing = table[column].isna()
-    if bool(missing.any()):
-        table.loc[missing, column] = value
-
-
-def _fill_missing_series(table, column: str, values) -> None:
-    if column not in table.columns:
-        table[column] = values
-        return
-
-    missing = table[column].isna()
-    if bool(missing.any()):
-        table.loc[missing, column] = values.loc[missing]
-
-
-def _ensure_bus_constraints(net: pandapowerNet) -> None:
-    _fill_missing_scalar(net.bus, "min_vm_pu", DEFAULT_BUS_MIN_VM_PU)
-    _fill_missing_scalar(net.bus, "max_vm_pu", DEFAULT_BUS_MAX_VM_PU)
-
-
-def _ensure_gen_constraints(net: pandapowerNet) -> None:
-    if len(net.gen) == 0:
-        return
-
-    _fill_missing_scalar(net.gen, "controllable", True)
-    _fill_missing_scalar(net.gen, "min_p_mw", 0.0)
-
-    default_max_p = net.gen["p_mw"].abs().clip(lower=1.0) * 1.5
-    _fill_missing_series(net.gen, "max_p_mw", default_max_p)
-
-    _fill_missing_scalar(net.gen, "min_q_mvar", -DEFAULT_REACTIVE_LIMIT_MVAR)
-    _fill_missing_scalar(net.gen, "max_q_mvar", +DEFAULT_REACTIVE_LIMIT_MVAR)
-
-
-def _ensure_ext_grid_constraints(net: pandapowerNet) -> None:
-    if len(net.ext_grid) == 0:
-        return
-
-    _fill_missing_scalar(net.ext_grid, "controllable", True)
-    _fill_missing_scalar(net.ext_grid, "min_p_mw", -DEFAULT_SLACK_ACTIVE_LIMIT_MW)
-    _fill_missing_scalar(net.ext_grid, "max_p_mw", +DEFAULT_SLACK_ACTIVE_LIMIT_MW)
-    _fill_missing_scalar(net.ext_grid, "min_q_mvar", -DEFAULT_REACTIVE_LIMIT_MVAR)
-    _fill_missing_scalar(net.ext_grid, "max_q_mvar", +DEFAULT_REACTIVE_LIMIT_MVAR)
-
-
-def _ensure_sgen_constraints(net: pandapowerNet) -> None:
-    if len(net.sgen) == 0:
-        return
-
-    _fill_missing_scalar(net.sgen, "controllable", True)
-    _fill_missing_scalar(net.sgen, "min_p_mw", 0.0)
-
-    default_max_p = net.sgen["p_mw"].abs().clip(lower=1.0) * 1.5
-    _fill_missing_series(net.sgen, "max_p_mw", default_max_p)
-
-    _fill_missing_scalar(net.sgen, "min_q_mvar", -DEFAULT_REACTIVE_LIMIT_MVAR)
-    _fill_missing_scalar(net.sgen, "max_q_mvar", +DEFAULT_REACTIVE_LIMIT_MVAR)
-
-
-def _ensure_branch_limits(net: pandapowerNet) -> None:
-    if len(net.line) > 0:
-        _fill_missing_scalar(net.line, "max_loading_percent", DEFAULT_MAX_LOADING_PERCENT)
-    if len(net.trafo) > 0:
-        _fill_missing_scalar(net.trafo, "max_loading_percent", DEFAULT_MAX_LOADING_PERCENT)
-
-
-def _align_bus_limits_with_voltage_setpoints(net: pandapowerNet) -> None:
-    for table_name in ("gen", "ext_grid"):
-        table = getattr(net, table_name, None)
-        if table is None or len(table) == 0 or "vm_pu" not in table.columns:
-            continue
-
-        grouped = table.groupby("bus")["vm_pu"].agg(["min", "max"])
-
-        for bus_index, row in grouped.iterrows():
-            vm_min = float(row["min"])
-            vm_max = float(row["max"])
-
-            current_min = float(net.bus.at[bus_index, "min_vm_pu"])
-            current_max = float(net.bus.at[bus_index, "max_vm_pu"])
-
-            net.bus.at[bus_index, "min_vm_pu"] = min(current_min, vm_min)
-            net.bus.at[bus_index, "max_vm_pu"] = max(current_max, vm_max)
-
-
-def _ensure_costs(net: pandapowerNet) -> None:
-    poly_cost = getattr(net, "poly_cost", None)
-    if poly_cost is not None and len(poly_cost) > 0:
-        return
-
-    pwl_cost = getattr(net, "pwl_cost", None)
-    if pwl_cost is not None and len(pwl_cost) > 0:
-        return
-
-    if len(net.gen) > 0:
-        for position, element_index in enumerate(net.gen.index.to_list()):
-            create_poly_cost(
-                net,
-                int(element_index),
-                "gen",
-                cp1_eur_per_mw=1.0 + 0.1 * position,
-            )
-
-    if len(net.ext_grid) > 0:
-        for position, element_index in enumerate(net.ext_grid.index.to_list()):
-            create_poly_cost(
-                net,
-                int(element_index),
-                "ext_grid",
-                cp1_eur_per_mw=10.0 + 0.1 * position,
-            )
-
-    if len(net.sgen) > 0:
-        for position, element_index in enumerate(net.sgen.index.to_list()):
-            create_poly_cost(
-                net,
-                int(element_index),
-                "sgen",
-                cp1_eur_per_mw=2.0 + 0.1 * position,
-            )
-
-
-def _ensure_opf_ready(net: pandapowerNet) -> pandapowerNet:
-    _ensure_bus_constraints(net)
-    _ensure_branch_limits(net)
-    _ensure_gen_constraints(net)
-    _ensure_sgen_constraints(net)
-    _ensure_ext_grid_constraints(net)
-    _ensure_costs(net)
-    _align_bus_limits_with_voltage_setpoints(net)
-    return net
+PGLIB_ROOT = Path(__file__).resolve().parents[3] / "pglib-opf"
 
 
 def _empty_bus_frame() -> pl.DataFrame:
@@ -207,21 +64,37 @@ def _empty_edge_frame() -> pl.DataFrame:
 
 
 def list_supported_networks() -> tuple[str, ...]:
-    return tuple(NETWORK_BUILDERS)
+    return tuple(CASE_FILES)
 
 
 def build_network(name: str) -> pandapowerNet:
     try:
-        builder = NETWORK_BUILDERS[name]
+        filename = CASE_FILES[name]
     except KeyError as error:
         available = ", ".join(list_supported_networks())
         raise ValueError(f"Unknown network {name!r}. Available networks: {available}.") from error
 
-    return _ensure_opf_ready(cast(pandapowerNet, builder()))
+    path = PGLIB_ROOT / filename
+    print(path)
+    if not path.exists():
+        raise FileNotFoundError(f"PGLib case file not found: {path}")
+
+    net = from_mpc(str(path), validate_conversion=False)
+    if len(net.ext_grid) > 0:
+        net.ext_grid["controllable"] = True
+    if len(net.gen) > 0:
+        net.gen["controllable"] = True
+    if len(net.sgen) > 0:
+        net.sgen["controllable"] = True
+    return net
+
+
+@cache
+def network_template(name: str) -> pandapowerNet:
+    return build_network(name)
 
 
 def export_static_tables(net: pandapowerNet) -> tuple[pl.DataFrame, pl.DataFrame]:
-    # --- Buses ---
     buses = (
         pl.from_pandas(net.bus.reset_index().rename(columns={"index": "bus_index"})).select(
             pl.col("bus_index").cast(pl.Int64),
@@ -237,7 +110,6 @@ def export_static_tables(net: pandapowerNet) -> tuple[pl.DataFrame, pl.DataFrame
         else _empty_bus_frame()
     )
 
-    # --- Lines ---
     if len(net.line) > 0:
         lines = pl.from_pandas(
             net.line.reset_index().rename(columns={"index": "element_index"})
@@ -265,7 +137,6 @@ def export_static_tables(net: pandapowerNet) -> tuple[pl.DataFrame, pl.DataFrame
     else:
         lines = _empty_edge_frame()
 
-    # --- Trafos ---
     if len(net.trafo) > 0:
         trafos = pl.from_pandas(
             net.trafo.reset_index().rename(columns={"index": "element_index"})

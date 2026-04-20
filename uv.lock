@@ -1051,6 +1051,19 @@ wheels = [
 ]
 
 [[package]]
+name = "matpowercaseframes"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4d/ee/bc2780e989bfeea8f2873e351095715c0c68235a4554ed8d496923727f8e/matpowercaseframes-2.1.0.tar.gz", hash = "sha256:f3e78ae3648aebf2cc19dff994a4ddf0581d4052e12cf97b132c7c1eee892bc8", size = 26138, upload-time = "2026-04-01T23:03:43.918Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/91/c0b1a6a76ede1a31081784ee513a183e3f55d8b6c66abfc85e3a3a6d27b9/matpowercaseframes-2.1.0-py3-none-any.whl", hash = "sha256:80aee79d4863b54fe1c04ec75e13324ecf14df6fa3e665dc6eb9c7fc0edf520c", size = 20326, upload-time = "2026-04-01T23:03:42.802Z" },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1066,6 +1079,7 @@ source = { editable = "." }
 dependencies = [
     { name = "juliacall" },
     { name = "matplotlib" },
+    { name = "matpowercaseframes" },
     { name = "numba" },
     { name = "numpy" },
     { name = "pandapower", extra = ["pandamodels"] },
@@ -1093,6 +1107,7 @@ dev = [
 requires-dist = [
     { name = "juliacall", specifier = ">=0.9.31" },
     { name = "matplotlib", specifier = ">=3.8" },
+    { name = "matpowercaseframes", specifier = ">=2.1.0" },
     { name = "numba", specifier = ">=0.65.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandapower", extras = ["pandamodels"], specifier = ">=3.4.0" },

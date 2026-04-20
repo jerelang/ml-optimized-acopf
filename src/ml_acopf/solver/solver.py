@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import time
 from typing import Any, TypedDict
 
@@ -10,6 +12,19 @@ from ..config import SolverConfig
 from ..utils import as_optional_float, as_optional_int
 from .callback import make_pp_to_pm_callback
 from .io import SolveStats, WarmStartPayload
+
+
+@contextlib.contextmanager
+def _suppress_output(enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    with (
+        contextlib.redirect_stdout(io.StringIO()),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        yield
 
 
 def solve_ac_opf(
@@ -23,20 +38,21 @@ def solve_ac_opf(
 
     started_at = time.perf_counter()
     try:
-        runpm_ac_opf(
-            net,
-            pp_to_pm_callback=pp_to_pm_callback,
-            calculate_voltage_angles=settings.calculate_voltage_angles,
-            delta=settings.delta,
-            check_connectivity=settings.check_connectivity,
-            pm_solver=settings.pm_solver,
-            correct_pm_network_data=settings.correct_pm_network_data,
-            silence=settings.silence,
-            pm_log_level=settings.pm_log_level,
-            delete_buffer_file=settings.delete_buffer_file,
-            opf_flow_lim=settings.opf_flow_lim,
-            pm_tol=settings.pm_tol,
-        )
+        with _suppress_output(settings.silence):
+            runpm_ac_opf(
+                net,
+                pp_to_pm_callback=pp_to_pm_callback,
+                calculate_voltage_angles=settings.calculate_voltage_angles,
+                delta=settings.delta,
+                check_connectivity=settings.check_connectivity,
+                pm_solver=settings.pm_solver,
+                correct_pm_network_data=settings.correct_pm_network_data,
+                silence=settings.silence,
+                pm_log_level=settings.pm_log_level,
+                delete_buffer_file=settings.delete_buffer_file,
+                opf_flow_lim=settings.opf_flow_lim,
+                pm_tol=settings.pm_tol,
+            )
 
         wall_time_s = time.perf_counter() - started_at
         return SolveStats(success=True, wall_time_s=wall_time_s, **_extract_pm_stats(net))

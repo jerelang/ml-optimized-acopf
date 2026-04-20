@@ -1,62 +1,49 @@
 [data]
-name = "case30_standard"
+name = "pglib_case30_standard"
 network_name = "case30"
-n_cases = 50
+n_cases = 1000
 seed = 123
 max_attempts_multiplier = 10
 
 [perturb]
 load_scale_min = 0.90
 load_scale_max = 1.10
-
-[solver]
-pm_solver = "ipopt"
-pm_tol = 1e-8
-pm_log_level = 0
-delta = 1e-8
-calculate_voltage_angles = true
-check_connectivity = true
-correct_pm_network_data = true
-silence = true
-delete_buffer_file = true
-opf_flow_lim = "S"
+local_load_noise_scale = 0.05
+reactive_noise_scale = 0.02
 
 [model]
 hidden_channels = 64
 dropout = 0.0
 device_type_embedding_dim = 4
-action_std_init = 0.05
+action_std_init = 0.02
 
 [pretrain]
-epochs = 100
-batch_size = 8
+epochs = 75
+batch_size = 16
 learning_rate = 1e-3
 weight_decay = 0.0
 
 [ppo]
 updates = 100
-rollout_size = 32
-learning_rate = 3e-4
-clip_ratio = 0.2
+rollout_size = 64
+learning_rate = 5e-5
+clip_ratio = 0.1
 value_loss_weight = 0.5
-entropy_weight = 0.01
-ppo_epochs = 8
+entropy_weight = 0.0
+ppo_epochs = 4
 max_grad_norm = 1.0
-nonconvergence_penalty = 10.0
+nonconvergence_penalty = 30.0
 seed = 123
 
-[normalization]
-max_voltage_angle_deg = 60.0
-
 [search]
-hidden_channels = [64, 128, 256, 512]
-ppo_learning_rate = [5e-4, 3e-4]
-ppo_entropy_weight = [1e-2]
-nonconvergence_penalty = [10]
+hidden_channels = [64, 128]
+ppo_learning_rate = [5e-5, 1e-4]
+ppo_entropy_weight = [0.0, 1e-4]
+nonconvergence_penalty = [30, 50]
 
 [benchmark]
 network_names = ["case30"]
-n_cases = 300
+n_cases = 1000
 seed = 123
 include_flat = true
 include_pf = true

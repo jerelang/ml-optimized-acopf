@@ -15,7 +15,7 @@ from .cases.generate import (
     export_load_inputs,
     sample_bus_load_profile,
 )
-from .cases.networks import build_network, export_static_tables
+from .cases.networks import export_static_tables, network_template
 from .config import SolverConfig
 from .solver.io import (
     SolveStats,
@@ -70,6 +70,8 @@ def run_benchmark(
     seed: int,
     load_scale_min: float,
     load_scale_max: float,
+    local_load_noise_scale: float = 0.05,
+    reactive_noise_scale: float = 0.05,
     solver: SolverConfig,
     include_flat: bool = True,
     include_pf: bool = True,
@@ -87,8 +89,9 @@ def run_benchmark(
 
     for network_name in unique_network_names:
         rng = np.random.default_rng(seed)
-        base_net = build_network(network_name)
+        base_net = network_template(network_name)
         buses_static, edges_static = export_static_tables(base_net)
+        device_metadata = export_device_metadata(base_net)
 
         for sample_index in range(n_cases):
             profile = sample_bus_load_profile(
@@ -96,6 +99,8 @@ def run_benchmark(
                 rng,
                 total_scale_min=load_scale_min,
                 total_scale_max=load_scale_max,
+                local_load_noise_scale=local_load_noise_scale,
+                reactive_noise_scale=reactive_noise_scale,
             )
             perturbed_net = apply_bus_load_profile(base_net, profile)
             case_id = make_case_id(network_name, seed, sample_index)
@@ -126,11 +131,11 @@ def run_benchmark(
                         check_connectivity=solver.check_connectivity,
                         init="auto",
                     )
-                    prep_time_s = time.perf_counter() - started_at
                     warmstart = WarmStartPayload(
                         bus=export_bus_warmstart(net_pf, case_id),
                         device=export_device_warmstart(net_pf, case_id),
                     )
+                    prep_time_s = time.perf_counter() - started_at
                     stats = solve_ac_opf(net_pf, solver, warmstart=warmstart)
                 except Exception as error:
                     prep_time_s = time.perf_counter() - started_at
@@ -163,7 +168,7 @@ def run_benchmark(
                         buses_static=buses_static,
                         edges_static=edges_static,
                         load_inputs=load_inputs,
-                        device_metadata=export_device_metadata(perturbed_net),
+                        device_metadata=device_metadata,
                         max_voltage_angle_deg=max_voltage_angle_deg,
                     )
                     warmstart = predictor.predict(graph, case_id)

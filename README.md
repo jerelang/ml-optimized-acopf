@@ -2,13 +2,15 @@
 
 Generate solved AC-OPF cases, train a GNN warm-start actor with supervised pretraining and PPO, and benchmark flat, PF, and actor warm starts.
 
-## Supported networks
+## Supported PGLIB-OPF networks
 
 - `case14`
 - `case30`
 - `case57`
 - `case118`
 - `case300`
+- `case118.api`
+- `case118.sad`
 
 ## Install
 
@@ -38,20 +40,6 @@ This writes the dataset to:
 data/<data.name>/baseline/
 ```
 
-Pretrain the actor GNN and then train with PPO on the generated dataset:
-
-```bash
-uv run ml_acopf train \
-  --config configs/default.toml \
-  --out outputs/models
-```
-
-This writes the actor to:
-
-```bash
-outputs/models/<run_name>/agent_ppo.pt
-```
-
 Run a basic 2-phase grid search for finding good hyperparameters:
 
 ```bash
@@ -64,6 +52,20 @@ This writes the best searched actor to:
 
 ```bash
 outputs/search/<run_name>/agent_ppo.pt
+```
+
+Pretrain the actor GNN and then train with PPO on the generated dataset:
+
+```bash
+uv run ml_acopf train \
+  --config configs/default.toml \
+  --out outputs/models
+```
+
+This writes the actor to:
+
+```bash
+outputs/models/<run_name>/agent_ppo.pt
 ```
 Benchmark flat, PF, and actor predicted warm starts:
 

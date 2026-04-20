@@ -159,6 +159,7 @@ def _plot_boxplot_by_group(
         y=value_column,
         ax=ax,
     )
+    ax.set_yscale("log")
     ax.set_xlabel("")
     ax.set_ylabel(ylabel)
     ax.set_title(title)

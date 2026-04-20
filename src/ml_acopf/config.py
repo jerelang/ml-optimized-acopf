@@ -27,19 +27,6 @@ class DataConfig(BaseModel):
         return value
 
 
-class PerturbConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    load_scale_min: float = Field(default=0.90, gt=0.0)
-    load_scale_max: float = Field(default=1.10, gt=0.0)
-
-    @model_validator(mode="after")
-    def validate_range(self) -> PerturbConfig:
-        if self.load_scale_min > self.load_scale_max:
-            raise ValueError("perturb.load_scale_min must be <= perturb.load_scale_max.")
-        return self
-
-
 class SolverConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
 
@@ -126,6 +113,21 @@ class BenchmarkConfig(BaseModel):
     include_flat: bool = True
     include_pf: bool = True
     create_plots: bool = True
+
+
+class PerturbConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    load_scale_min: float = Field(default=0.90, gt=0.0)
+    load_scale_max: float = Field(default=1.10, gt=0.0)
+    local_load_noise_scale: float = Field(default=0.05, ge=0.0)
+    reactive_noise_scale: float = Field(default=0.02, ge=0.0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> PerturbConfig:
+        if self.load_scale_min > self.load_scale_max:
+            raise ValueError("perturb.load_scale_min must be <= perturb.load_scale_max.")
+        return self
 
 
 class Config(BaseModel):

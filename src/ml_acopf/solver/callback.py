@@ -18,7 +18,7 @@ def make_pp_to_pm_callback(
         ppci: object,
         pm: dict[str, Any],
     ) -> None:
-        del net, ppci  # required by pandapower callback signature
+        del net, ppci  # required by pandapower signature
 
         if payload.bus is not None and not payload.bus.is_empty():
             _inject_bus_starts(pm, payload.bus)
@@ -89,7 +89,6 @@ def _inject_device_starts(pm: dict[str, Any], frame: pl.DataFrame) -> None:
     if base_mva == 0.0:
         base_mva = 1.0
 
-    # In PowerModels, active/reactive start values live on generator-like components.
     for gen in _pm_component_values(pm, "gen"):
         source_key = _source_key(gen, default_type="gen")
         if source_key is None:
@@ -133,7 +132,4 @@ def _source_key(
         except (TypeError, ValueError):
             pass
 
-    try:
-        return default_type, int(component["index"])
-    except (KeyError, TypeError, ValueError):
-        return None
+    return default_type, int(component["index"])

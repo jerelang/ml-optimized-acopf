@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from .utils import detect_os
+
+opsys = detect_os()
+
 
 def ensure_julia_ready() -> None:
-    from juliacall import Main as jl
+    if opsys == "linux":
+        import juliacall  # noqa F401
+        from juliacall import Main as jl
 
-    jl.seval("using Ipopt, PowerModels, JSON, JuMP, PandaModels")
+        jl.seval("using Ipopt, PowerModels, JSON, JuMP, PandaModels")
+    elif opsys == "macos":
+        import juliacall  # noqa F401
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -49,6 +56,33 @@ def cases_command(
 
 
 @app.command(
+    name="search",
+    help="Do a small hyperparameter search using a train/validation split.",
+)
+def search_command(
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
+    ] = DEFAULT_CONFIG_PATH,
+    out: Annotated[
+        Path,
+        typer.Option("--out", "-o"),
+    ] = DEFAULT_SEARCH_VALIDATE_OUT,
+) -> None:
+    ensure_julia_ready()
+    import torch
+
+    from .learning.search import search
+
+    device = torch.device("cpu")
+    if opsys == "linux" and torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif opsys == "macos" and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    search(config, out, device)
+
+
+@app.command(
     name="train",
     help="Pretrain the actor using the offline dataset and then train with PPO.",
 )
@@ -83,19 +117,32 @@ def train_command(
     from .plotting import plot_ppo_history, plot_pretrain_history
     from .utils import make_run_name, write_parquet
 
+    device = torch.device("cpu")
+    if opsys == "linux" and torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif opsys == "macos" and torch.backends.mps.is_available():
+        device = torch.device("mps")
+
     if config_from_actor is not None:
         checkpoint = torch.load(config_from_actor, map_location="cpu")
         cfg = Config.model_validate(checkpoint["full_cfg"])
     else:
         cfg = load_config(config)
 
-    dataset = WarmStartDataset(
+    pretrain_dataset = WarmStartDataset(
         cfg.dataset_root,
         max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+        case_source="converged",
     )
 
+    ppo_dataset = WarmStartDataset(
+        cfg.dataset_root,
+        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
+        case_source="all",
+    )
+    typer.echo(f"pretrain/PPO cases: {len(pretrain_dataset)} / {len(ppo_dataset)}")
     actor = VoltageWarmStartActor(
-        in_channels=dataset.input_channels,
+        in_channels=pretrain_dataset.input_channels,
         hidden_channels=cfg.model.hidden_channels,
         dropout=cfg.model.dropout,
         action_std_init=cfg.model.action_std_init,
@@ -103,7 +150,8 @@ def train_command(
     )
     pretrain_history = pretrain_actor_supervised(
         actor,
-        dataset,
+        pretrain_dataset,
+        device=device,
         epochs=cfg.pretrain.epochs,
         batch_size=cfg.pretrain.batch_size,
         learning_rate=cfg.pretrain.learning_rate,
@@ -114,7 +162,7 @@ def train_command(
     out.mkdir(parents=True, exist_ok=True)
     save_actor(
         actor=actor,
-        input_channels=dataset.input_channels,
+        input_channels=pretrain_dataset.input_channels,
         cfg=cfg,
         history=pretrain_history,
         out=out,
@@ -122,7 +170,7 @@ def train_command(
     write_parquet(pl.DataFrame(pretrain_history), out / "pretrain_history.parquet")
 
     critic = VoltageWarmStartCritic(
-        in_channels=dataset.input_channels,
+        in_channels=ppo_dataset.input_channels,
         hidden_channels=cfg.model.hidden_channels,
         dropout=cfg.model.dropout,
     )
@@ -137,16 +185,18 @@ def train_command(
     agent, ppo_history = train_ppo(
         actor,
         critic,
-        dataset,
+        ppo_dataset,
+        device=device,
         solver=cfg.solver,
         ppo_config=ppo_model_config,
         updates=cfg.ppo.updates,
         rollout_size=cfg.ppo.rollout_size,
         seed=cfg.ppo.seed,
+        nonconvergence_penalty=cfg.ppo.nonconvergence_penalty,
     )
     save_actor(
         actor=agent.actor,
-        input_channels=dataset.input_channels,
+        input_channels=ppo_dataset.input_channels,
         cfg=cfg,
         history=ppo_history,
         out=out,
@@ -163,273 +213,6 @@ def train_command(
 
         for path in created:
             typer.echo(f"wrote: {path}")
-
-
-@app.command(
-    name="search",
-    help="Do a small hyperparameter search using a train/validation split.",
-)
-def search_command(
-    config: Annotated[
-        Path,
-        typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
-    ] = DEFAULT_CONFIG_PATH,
-    out: Annotated[
-        Path,
-        typer.Option("--out", "-o"),
-    ] = DEFAULT_SEARCH_VALIDATE_OUT,
-) -> None:
-    ensure_julia_ready()
-    import random
-    from itertools import product
-
-    import torch
-    from tqdm import tqdm
-
-    from .config import load_config
-    from .learning.dataset import WarmStartDataset
-    from .learning.models import (
-        VoltageWarmStartActor,
-        VoltageWarmStartCritic,
-        save_actor,
-    )
-    from .learning.ppo import PPOConfig
-    from .learning.train import (
-        evaluate_policy,
-        evaluate_supervised_actor,
-        pretrain_actor_supervised,
-        train_ppo,
-    )
-    from .utils import make_run_name
-
-    @dataclass(slots=True)
-    class BestPretrain:
-        hidden_channels: int
-        score: float
-        actor_state_dict: dict[str, torch.Tensor]
-
-    @dataclass(slots=True)
-    class BestPPO:
-        success_rate: float
-        mean_solve_time: float
-        mean_reward: float
-        search_config: dict[str, float | int]
-
-    def to_cpu_state_dict(module: torch.nn.Module) -> dict[str, torch.Tensor]:
-        return {key: value.detach().cpu().clone() for key, value in module.state_dict().items()}
-
-    def is_better(
-        success_rate: float,
-        mean_solve_time: float,
-        current_best: BestPPO | None,
-    ) -> bool:
-        if current_best is None:
-            return True
-        if success_rate != current_best.success_rate:
-            return success_rate > current_best.success_rate
-        return mean_solve_time < current_best.mean_solve_time
-
-    cfg = load_config(config)
-    dataset_root = cfg.dataset_root
-    full_dataset = WarmStartDataset(
-        dataset_root=dataset_root,
-        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
-    )
-
-    case_ids = [full_dataset.case_metadata(i).case_id for i in range(len(full_dataset))]
-
-    rng = random.Random(cfg.ppo.seed)
-    rng.shuffle(case_ids)
-
-    split_index = max(1, int(0.8 * len(case_ids)))
-    if split_index >= len(case_ids):
-        split_index = len(case_ids) - 1
-
-    train_case_ids = case_ids[:split_index]
-    val_case_ids = case_ids[split_index:]
-
-    train_dataset = WarmStartDataset(
-        dataset_root,
-        case_ids=train_case_ids,
-        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
-    )
-    val_dataset = WarmStartDataset(
-        dataset_root,
-        case_ids=val_case_ids,
-        max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
-    )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    typer.echo(device)
-    run_name = make_run_name(cfg)
-    output_dir = out / run_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    best_pretrain: BestPretrain | None = None
-
-    for hidden_channels in tqdm(
-        cfg.search.hidden_channels, desc="Pretraining search", unit="config", position=2
-    ):
-        actor = VoltageWarmStartActor(
-            in_channels=full_dataset.input_channels,
-            hidden_channels=hidden_channels,
-            dropout=cfg.model.dropout,
-            action_std_init=cfg.model.action_std_init,
-            device_type_embedding_dim=cfg.model.device_type_embedding_dim,
-        )
-
-        pretrain_actor_supervised(
-            actor,
-            dataset=train_dataset,
-            epochs=cfg.pretrain.epochs,
-            batch_size=cfg.pretrain.batch_size,
-            learning_rate=cfg.pretrain.learning_rate,
-            weight_decay=cfg.pretrain.weight_decay,
-        )
-
-        val_loss = evaluate_supervised_actor(
-            val_dataset,
-            actor,
-            cfg.pretrain.batch_size,
-            device,
-        )
-
-        if best_pretrain is None or val_loss < best_pretrain.score:
-            best_pretrain = BestPretrain(
-                hidden_channels=hidden_channels,
-                score=val_loss,
-                actor_state_dict=to_cpu_state_dict(actor),
-            )
-
-    if best_pretrain is None:
-        raise ValueError("No pretrained actor.")
-
-    typer.echo(
-        f"Best hidden channel dimension during pretraining: "
-        f"{best_pretrain.hidden_channels} (val_loss={best_pretrain.score:.6f})"
-    )
-
-    best_final: BestPPO | None = None
-
-    ppo_combinations = list(
-        product(
-            cfg.search.ppo_learning_rate,
-            cfg.search.ppo_entropy_weight,
-            cfg.search.nonconvergence_penalty,
-        )
-    )
-
-    for learning_rate, entropy_weight, nonconvergence_penalty in tqdm(
-        ppo_combinations, desc="PPO search", unit="config", position=2
-    ):
-        actor = VoltageWarmStartActor(
-            in_channels=full_dataset.input_channels,
-            hidden_channels=best_pretrain.hidden_channels,
-            dropout=cfg.model.dropout,
-            action_std_init=cfg.model.action_std_init,
-            device_type_embedding_dim=cfg.model.device_type_embedding_dim,
-        )
-        actor.load_state_dict(best_pretrain.actor_state_dict)
-
-        critic = VoltageWarmStartCritic(
-            in_channels=full_dataset.input_channels,
-            hidden_channels=best_pretrain.hidden_channels,
-            dropout=cfg.model.dropout,
-        )
-
-        ppo_model_config = PPOConfig(
-            learning_rate=learning_rate,
-            clip_ratio=cfg.ppo.clip_ratio,
-            value_loss_weight=cfg.ppo.value_loss_weight,
-            entropy_weight=entropy_weight,
-            ppo_epochs=cfg.ppo.ppo_epochs,
-            max_grad_norm=cfg.ppo.max_grad_norm,
-        )
-
-        agent, history = train_ppo(
-            actor,
-            critic,
-            train_dataset,
-            solver=cfg.solver,
-            ppo_config=ppo_model_config,
-            updates=cfg.ppo.updates,
-            rollout_size=cfg.ppo.rollout_size,
-            nonconvergence_penalty=nonconvergence_penalty,
-            seed=cfg.ppo.seed,
-        )
-
-        metrics = evaluate_policy(
-            val_dataset,
-            agent.actor,
-            cfg.solver,
-            nonconvergence_penalty=nonconvergence_penalty,
-            device=device,
-        )
-
-        if is_better(metrics.success_rate, metrics.mean_solve_time, best_final):
-            best_final = BestPPO(
-                success_rate=metrics.success_rate,
-                mean_solve_time=metrics.mean_solve_time,
-                mean_reward=metrics.mean_reward,
-                search_config={
-                    "hidden_channels": best_pretrain.hidden_channels,
-                    "ppo_learning_rate": learning_rate,
-                    "ppo_entropy_weight": entropy_weight,
-                    "nonconvergence_penalty": nonconvergence_penalty,
-                },
-            )
-
-            best_cfg = cfg.model_copy(
-                update={
-                    "model": cfg.model.model_copy(
-                        update={
-                            "hidden_channels": int(best_pretrain.hidden_channels),
-                        }
-                    ),
-                    "ppo": cfg.ppo.model_copy(
-                        update={
-                            "learning_rate": float(learning_rate),
-                            "entropy_weight": float(entropy_weight),
-                            "nonconvergence_penalty": float(nonconvergence_penalty),
-                        }
-                    ),
-                }
-            )
-
-            save_actor(
-                actor=agent.actor,
-                input_channels=full_dataset.input_channels,
-                cfg=best_cfg,
-                history=history,
-                out=output_dir,
-            )
-
-            typer.echo(
-                f"New best config saved:\n"
-                f"  hidden_channels:         {best_final.search_config['hidden_channels']}\n"
-                f"  ppo_learning_rate:       {best_final.search_config['ppo_learning_rate']}\n"
-                f"  ppo_entropy_weight:      {best_final.search_config['ppo_entropy_weight']}\n"
-                f"  nonconvergence_penalty:  {best_final.search_config['nonconvergence_penalty']}\n"
-                f"  success_rate:            {best_final.success_rate:.2%}\n"
-                f"  mean_solve_time:         {best_final.mean_solve_time:.6f}\n"
-                f"  mean_reward:             {best_final.mean_reward:.6f}\n"
-                f"saved to: {output_dir}"
-            )
-
-    if best_final is None:
-        raise ValueError("No PPO config was selected.")
-
-    typer.echo(
-        f"Best final config:\n"
-        f"  hidden_channels:         {best_final.search_config['hidden_channels']}\n"
-        f"  ppo_learning_rate:       {best_final.search_config['ppo_learning_rate']}\n"
-        f"  ppo_entropy_weight:      {best_final.search_config['ppo_entropy_weight']}\n"
-        f"  nonconvergence_penalty:  {best_final.search_config['nonconvergence_penalty']}\n"
-        f"  success_rate:            {best_final.success_rate:.2%}\n"
-        f"  mean_solve_time:         {best_final.mean_solve_time:.6f}\n"
-        f"  mean_reward:             {best_final.mean_reward:.6f}\n"
-        f"saved to: {output_dir}"
-    )
 
 
 @app.command(
@@ -469,9 +252,13 @@ def benchmark_command(
     cfg = Config.model_validate(checkpoint["full_cfg"])
 
     actor = load_actor(actor_path)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    if opsys == "linux" and torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif opsys == "macos" and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    actor.to(device)
     predictor = WarmStartPredictor(model=actor, device=device)
-
     network_names = tuple(cfg.benchmark.network_names) or (cfg.data.network_name,)
     run_name = make_run_name(cfg)
     result_path = out / run_name / f"{run_name}_benchmark.parquet"
@@ -482,6 +269,8 @@ def benchmark_command(
         seed=cfg.benchmark.seed,
         load_scale_min=cfg.perturb.load_scale_min,
         load_scale_max=cfg.perturb.load_scale_max,
+        local_load_noise_scale=cfg.perturb.local_load_noise_scale,
+        reactive_noise_scale=cfg.perturb.reactive_noise_scale,
         solver=cfg.solver,
         include_flat=cfg.benchmark.include_flat,
         include_pf=cfg.benchmark.include_pf,

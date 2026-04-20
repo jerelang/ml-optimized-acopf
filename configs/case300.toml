@@ -1,32 +1,32 @@
 [data]
-name = "pglib_case118_standard"
-network_name = "case118"
-n_cases = 1000
+name = "pglib_case300_standard"
+network_name = "case300"
+n_cases = 500
 seed = 123
 max_attempts_multiplier = 10
 
 [perturb]
-load_scale_min = 0.97
-load_scale_max = 1.03
-local_load_noise_scale = 0.02
-reactive_noise_scale = 0.01
+load_scale_min = 0.98
+load_scale_max = 1.02
+local_load_noise_scale = 0.015
+reactive_noise_scale = 0.005
 
 [model]
-hidden_channels = 128
+hidden_channels = 256
 dropout = 0.0
 device_type_embedding_dim = 4
-action_std_init = 0.01
+action_std_init = 0.005
 
 [pretrain]
 epochs = 75
-batch_size = 16
+batch_size = 8
 learning_rate = 1e-3
 weight_decay = 0.0
 
 [ppo]
-updates = 60
-rollout_size = 32
-learning_rate = 5e-5
+updates = 40
+rollout_size = 16
+learning_rate = 3e-5
 clip_ratio = 0.1
 value_loss_weight = 0.5
 entropy_weight = 0.0
@@ -37,13 +37,13 @@ seed = 123
 
 [search]
 hidden_channels = [128, 256]
-ppo_learning_rate = [3e-5, 5e-5, 1e-4]
+ppo_learning_rate = [3e-5, 5e-5]
 ppo_entropy_weight = [0.0]
 nonconvergence_penalty = [50]
 
 [benchmark]
-network_names = ["case118"]
-n_cases = 1000
+network_names = ["case300"]
+n_cases = 500
 seed = 123
 include_flat = true
 include_pf = true

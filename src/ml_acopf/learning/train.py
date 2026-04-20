@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import random
 from dataclasses import dataclass
 
@@ -10,7 +11,7 @@ from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 from ..cases.generate import apply_load_inputs
-from ..cases.networks import build_network
+from ..cases.networks import network_template
 from ..config import SolverConfig
 from ..solver.io import WarmStartPayload
 from ..solver.solver import solve_ac_opf
@@ -47,8 +48,8 @@ def evaluate_warmstart_action(
     metadata = dataset.case_metadata(case_index)
     graph = dataset[case_index]
 
-    net = build_network(metadata.network_name)
-    net = apply_load_inputs(net, dataset.load_inputs_for_case(metadata.case_id))
+    net = copy.deepcopy(network_template(metadata.network_name))
+    apply_load_inputs(net, dataset.load_inputs_for_case(metadata.case_id))
 
     bus_values = denormalize_bus_values(
         normalized_action.bus.detach().cpu(),
@@ -96,13 +97,13 @@ def evaluate_warmstart_action(
 def pretrain_actor_supervised(
     actor: VoltageWarmStartActor,
     dataset: WarmStartDataset,
+    device: torch.device,
     *,
     epochs: int = 50,
     batch_size: int = 8,
     learning_rate: float = 1e-3,
     weight_decay: float = 0.0,
 ) -> list[dict[str, float]]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     actor.to(device)
 
     optimizer = torch.optim.Adam(
@@ -117,7 +118,7 @@ def pretrain_actor_supervised(
     )
 
     history: list[dict[str, float]] = []
-    epoch_progress = tqdm(range(epochs), desc="Pretraining", unit="epoch", position=0)
+    epoch_progress = tqdm(range(epochs), desc="Pretraining", unit="epoch", position=1, leave=True)
     for epoch in epoch_progress:
         actor.train()
         running_loss = 0.0
@@ -179,6 +180,7 @@ def train_ppo(
     critic: VoltageWarmStartCritic,
     dataset: WarmStartDataset,
     solver: SolverConfig,
+    device: torch.device,
     *,
     ppo_config: PPOConfig | None = None,
     updates: int = 100,
@@ -186,7 +188,6 @@ def train_ppo(
     nonconvergence_penalty: float = 10.0,
     seed: int = 0,
 ) -> tuple[PPOAgent, list[dict[str, float]]]:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     agent = PPOAgent(
         actor=actor,
         critic=critic,
@@ -196,7 +197,7 @@ def train_ppo(
 
     rng = random.Random(seed)
     history: list[dict[str, float]] = []
-    update_progress = tqdm(range(updates), desc="PPO Updates", unit="updates", position=0)
+    update_progress = tqdm(range(updates), desc="PPO Updates", unit="updates", position=1)
     for update_index in update_progress:
         buffer = RolloutBuffer()
         reward_values: list[float] = []
@@ -204,7 +205,7 @@ def train_ppo(
         solve_times: list[float] = []
 
         rollout_bar = tqdm(
-            range(rollout_size), desc="Rollout", unit="step", leave=False, position=1
+            range(rollout_size), desc="Rollout", unit="step", leave=False, position=2
         )
         for _ in rollout_bar:
             case_index = rng.randrange(len(dataset))
@@ -270,13 +271,11 @@ def evaluate_policy(
     dataset: WarmStartDataset,
     actor: VoltageWarmStartActor,
     solver: SolverConfig,
+    device: torch.device,
     *,
     nonconvergence_penalty: float = 10.0,
-    device: torch.device | None = None,
 ) -> ValidationMetrics:
-    resolved_device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    actor = actor.to(resolved_device)
+    actor = actor.to(device)
     actor.eval()
 
     rewards: list[float] = []
@@ -285,7 +284,7 @@ def evaluate_policy(
 
     with torch.no_grad():
         for case_index in range(len(dataset)):
-            graph = dataset[case_index].to(resolved_device)
+            graph = dataset[case_index].to(device)
 
             action = actor(
                 graph.x,
