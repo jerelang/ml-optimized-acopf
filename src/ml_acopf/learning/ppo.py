@@ -20,6 +20,10 @@ class PPOConfig:
     entropy_weight: float = 0.01
     ppo_epochs: int = 4
     max_grad_norm: float = 1.0
+    action_std_init: float = 0.25
+    action_std_decay_rate: float = 0.01
+    action_std_decay_every_steps: int = 250
+    action_std_min: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,13 +80,23 @@ class PPOAgent:
         self.critic = critic
         self.config = config
         self.device = device or torch.device("cpu")
-
+        self.current_action_std = config.action_std_init
+        self.rollout_steps = 0
         self.actor.to(self.device)
         self.critic.to(self.device)
 
         self.optimizer = torch.optim.Adam(
             list(self.actor.parameters()) + list(self.critic.parameters()),
             lr=config.learning_rate,
+        )
+
+    def decay_action_std(self) -> None:
+        self.rollout_steps += 1
+        if self.rollout_steps % self.config.action_std_decay_every_steps != 0:
+            return
+        self.current_action_std = max(
+            self.config.action_std_min,
+            self.current_action_std - self.config.action_std_decay_rate,
         )
 
     def act(self, data: Data, *, stochastic: bool = True) -> tuple[WarmStartAction, float, float]:
@@ -103,6 +117,7 @@ class PPOAgent:
                 graph.edge_index,
                 graph.device_bus_index,
                 graph.device_type_id,
+                action_std=self.current_action_std,
             )
             if stochastic:
                 bus_action = dist.bus.sample()
@@ -191,6 +206,7 @@ class PPOAgent:
                 batch.edge_index,
                 batch.device_bus_index,
                 batch.device_type_id,
+                action_std=self.current_action_std,
             )
 
             bus_node_log_prob = dist.bus.log_prob(actions_bus).sum(dim=-1, keepdim=True)

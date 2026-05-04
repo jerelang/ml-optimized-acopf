@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from pandapower.auxiliary import pandapowerNet
+from tqdm import tqdm
 
 from ..config import Config
 from ..solver.io import (
@@ -257,7 +258,7 @@ def generate_cases(cfg: Config) -> dict[str, object]:
     max_attempts = cfg.data.n_cases * cfg.data.max_attempts_multiplier
     successful_cases = 0
     attempted_cases = 0
-
+    pbar = tqdm(total=cfg.data.n_cases)
     for sample_index in range(max_attempts):
         if successful_cases >= cfg.data.n_cases:
             break
@@ -305,6 +306,8 @@ def generate_cases(cfg: Config) -> dict[str, object]:
         bus_target_frames.append(export_bus_results(net, case_id))
         dispatch_target_frames.append(export_dispatch_results(net, case_id))
         successful_cases += 1
+        pbar.update(1)
+    pbar.close()
 
     write_parquet(
         pl.DataFrame(data=attempted_rows, schema=CASES_SCHEMA),

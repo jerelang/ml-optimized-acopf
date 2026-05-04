@@ -236,6 +236,7 @@ def train_ppo(
                 reward=f"{step.reward:.3f}",
                 success=step.success,
             )
+            agent.decay_action_std()
 
         update_stats = agent.update(buffer)
         mean_reward = sum(reward_values) / max(len(reward_values), 1)
@@ -248,6 +249,7 @@ def train_ppo(
                 "mean_reward": mean_reward,
                 "success_rate": success_rate,
                 "mean_solve_time": mean_solve_time,
+                "action_std": agent.current_action_std,
                 **update_stats,
             }
         )

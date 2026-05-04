@@ -68,6 +68,10 @@ def search_command(
         Path,
         typer.Option("--out", "-o"),
     ] = DEFAULT_SEARCH_VALIDATE_OUT,
+    pretrain: Annotated[
+        bool,
+        typer.Option("--pretrain", "-p", is_flag=True),
+    ] = False,
 ) -> None:
     ensure_julia_ready()
     import torch
@@ -79,7 +83,7 @@ def search_command(
         device = torch.device("cuda")
     elif opsys == "macos" and torch.backends.mps.is_available():
         device = torch.device("mps")
-    search(config, out, device)
+    search(config, out, device, pretrain=pretrain)
 
 
 @app.command(
@@ -99,6 +103,10 @@ def train_command(
         Path,
         typer.Option("--out", "-o"),
     ] = DEFAULT_ACTOR_OUT,
+    pretrain: Annotated[
+        bool,
+        typer.Option("--pretrain", "-p", is_flag=True),
+    ] = False,
     plot: bool = True,
 ) -> None:
     ensure_julia_ready()
@@ -145,18 +153,19 @@ def train_command(
         in_channels=pretrain_dataset.input_channels,
         hidden_channels=cfg.model.hidden_channels,
         dropout=cfg.model.dropout,
-        action_std_init=cfg.model.action_std_init,
         device_type_embedding_dim=cfg.model.device_type_embedding_dim,
     )
-    pretrain_history = pretrain_actor_supervised(
-        actor,
-        pretrain_dataset,
-        device=device,
-        epochs=cfg.pretrain.epochs,
-        batch_size=cfg.pretrain.batch_size,
-        learning_rate=cfg.pretrain.learning_rate,
-        weight_decay=cfg.pretrain.weight_decay,
-    )
+    pretrain_history: list[dict[str, float]] = []
+    if pretrain:
+        pretrain_history = pretrain_actor_supervised(
+            actor,
+            pretrain_dataset,
+            device=device,
+            epochs=cfg.pretrain.epochs,
+            batch_size=cfg.pretrain.batch_size,
+            learning_rate=cfg.pretrain.learning_rate,
+            weight_decay=cfg.pretrain.weight_decay,
+        )
     run_name = make_run_name(cfg)
     out = out / run_name
     out.mkdir(parents=True, exist_ok=True)
@@ -181,6 +190,10 @@ def train_command(
         entropy_weight=cfg.ppo.entropy_weight,
         ppo_epochs=cfg.ppo.ppo_epochs,
         max_grad_norm=cfg.ppo.max_grad_norm,
+        action_std_init=cfg.ppo.action_std_init,
+        action_std_decay_rate=cfg.ppo.action_std_decay_rate,
+        action_std_decay_every_steps=cfg.ppo.action_std_decay_every_steps,
+        action_std_min=cfg.ppo.action_std_min,
     )
     agent, ppo_history = train_ppo(
         actor,

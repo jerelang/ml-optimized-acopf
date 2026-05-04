@@ -6,7 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-NetworkName = Literal["case14", "case30", "case57", "case118", "case300"]
+NetworkName = Literal[
+    "case14", "case30", "case57", "case118", "case300", "case118_api", "case118_sad"
+]
 OpfFlowLimit = Literal["S", "I"]
 
 
@@ -45,10 +47,9 @@ class SolverConfig(BaseModel):
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    hidden_channels: int = Field(default=128, gt=0)
+    hidden_channels: tuple[int, ...] = (64, 64, 64)
     dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
     device_type_embedding_dim: int = Field(default=4, gt=0)
-    action_std_init: float = Field(default=0.05, gt=0.0)
 
 
 class PretrainConfig(BaseModel):
@@ -71,8 +72,12 @@ class PpoTrainConfig(BaseModel):
     entropy_weight: float = Field(default=0.01, ge=0.0)
     ppo_epochs: int = Field(default=4, gt=0)
     max_grad_norm: float = Field(default=1.0, gt=0.0)
-    nonconvergence_penalty: float = Field(default=10.0, ge=0.0)
+    nonconvergence_penalty: float = Field(default=12.0, ge=0.0)
     seed: int = 123
+    action_std_init: float = Field(default=0.25, gt=0.0)
+    action_std_decay_rate: float = Field(default=0.01, ge=0.0)
+    action_std_decay_every_steps: int = Field(default=250, gt=0)
+    action_std_min: float = Field(default=0.0, ge=0.0)
 
 
 class NormalizationConfig(BaseModel):
@@ -89,7 +94,7 @@ class NormalizationConfig(BaseModel):
 class SearchConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    hidden_channels: list[int] = Field(default_factory=lambda: [64, 128, 256, 512])
+    hidden_channels: tuple[tuple[int, ...], ...] = ((64, 64, 64), (128, 128, 128))
     ppo_learning_rate: list[float] = Field(default_factory=lambda: [5e-4, 3e-4, 1e-4])
     ppo_entropy_weight: list[float] = Field(default_factory=lambda: [1e-2, 1e-3])
     nonconvergence_penalty: list[float] = Field(default_factory=lambda: [10.0, 12.0, 15.0])

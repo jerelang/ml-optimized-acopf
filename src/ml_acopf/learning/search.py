@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from abc.collections import Sequence
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
@@ -28,7 +29,7 @@ from .train import (
 
 @dataclass(slots=True)
 class BestPretrain:
-    hidden_channels: int
+    hidden_channels: Sequence[int]
     score: float
     actor_state_dict: dict[str, torch.Tensor]
 
@@ -38,7 +39,7 @@ class BestPPO:
     success_rate: float
     mean_solve_time: float
     mean_reward: float
-    search_config: dict[str, float | int]
+    search_config: dict[str, float | int | str]
 
 
 def to_cpu_state_dict(module: torch.nn.Module) -> dict[str, torch.Tensor]:
@@ -57,7 +58,7 @@ def is_better(
     return mean_solve_time < current_best.mean_solve_time
 
 
-def search(config: Path, out: Path, device: torch.device):
+def search(config: Path, out: Path, device: torch.device, pretrain: bool = False):
     cfg = load_config(config)
     dataset_root = cfg.dataset_root
     pretrain_dataset = WarmStartDataset(
@@ -104,62 +105,61 @@ def search(config: Path, out: Path, device: torch.device):
     output_dir = out / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pretrain_rows: list[dict[str, float | int]] = []
-    ppo_rows: list[dict[str, float | int]] = []
+    pretrain_rows: list[dict[str, str | float]] = []
+    ppo_rows: list[dict[str, str | float]] = []
     best_pretrain: BestPretrain | None = None
-
-    for hidden_channels in tqdm(
-        cfg.search.hidden_channels,
-        desc="Pretraining search",
-        unit="config",
-        position=0,
-    ):
-        actor = VoltageWarmStartActor(
-            in_channels=pretrain_dataset.input_channels,
-            hidden_channels=hidden_channels,
-            dropout=cfg.model.dropout,
-            action_std_init=cfg.model.action_std_init,
-            device_type_embedding_dim=cfg.model.device_type_embedding_dim,
-        )
-
-        pretrain_actor_supervised(
-            actor,
-            dataset=train_dataset,
-            device=device,
-            epochs=cfg.pretrain.epochs,
-            batch_size=cfg.pretrain.batch_size,
-            learning_rate=cfg.pretrain.learning_rate,
-            weight_decay=cfg.pretrain.weight_decay,
-        )
-
-        val_loss = evaluate_supervised_actor(
-            val_dataset,
-            actor,
-            cfg.pretrain.batch_size,
-            device,
-        )
-        pretrain_rows.append(
-            {
-                "hidden_channels": int(hidden_channels),
-                "val_loss": float(val_loss),
-            }
-        )
-        if best_pretrain is None or val_loss < best_pretrain.score:
-            best_pretrain = BestPretrain(
+    if pretrain:
+        for hidden_channels in tqdm(
+            cfg.search.hidden_channels,
+            desc="Pretraining search",
+            unit="config",
+            position=0,
+        ):
+            actor = VoltageWarmStartActor(
+                in_channels=pretrain_dataset.input_channels,
                 hidden_channels=hidden_channels,
-                score=val_loss,
-                actor_state_dict=to_cpu_state_dict(actor),
+                dropout=cfg.model.dropout,
+                device_type_embedding_dim=cfg.model.device_type_embedding_dim,
             )
 
-    if best_pretrain is None:
-        raise ValueError("No pretrained actor.")
-    pretrain_results = pl.DataFrame(pretrain_rows).sort("val_loss")
-    pretrain_results.write_csv(output_dir / "search_pretrain_results.csv")
+            pretrain_actor_supervised(
+                actor,
+                dataset=train_dataset,
+                device=device,
+                epochs=cfg.pretrain.epochs,
+                batch_size=cfg.pretrain.batch_size,
+                learning_rate=cfg.pretrain.learning_rate,
+                weight_decay=cfg.pretrain.weight_decay,
+            )
 
-    print(
-        f"Best hidden channel dimension during pretraining: "
-        f"{best_pretrain.hidden_channels} (val_loss={best_pretrain.score:.6f})"
-    )
+            val_loss = evaluate_supervised_actor(
+                val_dataset,
+                actor,
+                cfg.pretrain.batch_size,
+                device,
+            )
+            pretrain_rows.append(
+                {
+                    "hidden_channels": "-".join(str(v) for v in hidden_channels),
+                    "val_loss": float(val_loss),
+                }
+            )
+            if best_pretrain is None or val_loss < best_pretrain.score:
+                best_pretrain = BestPretrain(
+                    hidden_channels=hidden_channels,
+                    score=val_loss,
+                    actor_state_dict=to_cpu_state_dict(actor),
+                )
+
+        if best_pretrain is None:
+            raise ValueError("No pretrained actor.")
+        pretrain_results = pl.DataFrame(pretrain_rows).sort("val_loss")
+        pretrain_results.write_csv(output_dir / "search_pretrain_results.csv")
+
+        print(
+            f"Best hidden channel dimension during pretraining: "
+            f"{best_pretrain.hidden_channels} (val_loss={best_pretrain.score:.6f})"
+        )
 
     best_final: BestPPO | None = None
 
@@ -192,21 +192,25 @@ def search(config: Path, out: Path, device: torch.device):
         max_voltage_angle_deg=cfg.normalization.max_voltage_angle_deg,
         case_source="all",
     )
+    hidden_channels = cfg.model.hidden_channels
+    if pretrain and best_pretrain:
+        hidden_channels = best_pretrain.hidden_channels
+
     for learning_rate, entropy_weight, nonconvergence_penalty in tqdm(
         ppo_combinations, desc="PPO search", unit="config", position=0
     ):
         actor = VoltageWarmStartActor(
             in_channels=ppo_dataset.input_channels,
-            hidden_channels=best_pretrain.hidden_channels,
+            hidden_channels=hidden_channels,
             dropout=cfg.model.dropout,
-            action_std_init=cfg.model.action_std_init,
             device_type_embedding_dim=cfg.model.device_type_embedding_dim,
         )
-        actor.load_state_dict(best_pretrain.actor_state_dict)
+        if pretrain and best_pretrain:
+            actor.load_state_dict(best_pretrain.actor_state_dict)
 
         critic = VoltageWarmStartCritic(
             in_channels=ppo_dataset.input_channels,
-            hidden_channels=best_pretrain.hidden_channels,
+            hidden_channels=hidden_channels,
             dropout=cfg.model.dropout,
         )
 
@@ -241,7 +245,7 @@ def search(config: Path, out: Path, device: torch.device):
         )
         ppo_rows.append(
             {
-                "hidden_channels": int(best_pretrain.hidden_channels),
+                "hidden_channels": "-".join(str(v) for v in hidden_channels),
                 "ppo_learning_rate": float(learning_rate),
                 "ppo_entropy_weight": float(entropy_weight),
                 "nonconvergence_penalty": float(nonconvergence_penalty),
@@ -256,7 +260,7 @@ def search(config: Path, out: Path, device: torch.device):
                 mean_solve_time=metrics.mean_solve_time,
                 mean_reward=metrics.mean_reward,
                 search_config={
-                    "hidden_channels": best_pretrain.hidden_channels,
+                    "hidden_channels": "-".join(str(v) for v in hidden_channels),
                     "ppo_learning_rate": learning_rate,
                     "ppo_entropy_weight": entropy_weight,
                     "nonconvergence_penalty": nonconvergence_penalty,
@@ -267,7 +271,7 @@ def search(config: Path, out: Path, device: torch.device):
                 update={
                     "model": cfg.model.model_copy(
                         update={
-                            "hidden_channels": int(best_pretrain.hidden_channels),
+                            "hidden_channels": "-".join(str(v) for v in hidden_channels),
                         }
                     ),
                     "ppo": cfg.ppo.model_copy(

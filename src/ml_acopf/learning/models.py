@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,18 +36,13 @@ class GNNEncoder(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        hidden_channels: int = 128,
+        hidden_channels: Sequence[int],
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        dims = [in_channels, *hidden_channels]
         self.dropout = dropout
-        self.convs = nn.ModuleList(
-            [
-                GCNConv(in_channels, hidden_channels),
-                GCNConv(hidden_channels, hidden_channels),
-                GCNConv(hidden_channels, hidden_channels),
-            ]
-        )
+        self.convs = nn.ModuleList(GCNConv(dims[i], dims[i + 1]) for i in range(len(dims) - 1))
 
     def forward(self, x: Tensor, edge_index: Tensor) -> Tensor:
         for conv in self.convs:
@@ -62,28 +57,25 @@ class VoltageWarmStartActor(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        hidden_channels: int = 128,
+        hidden_channels: Sequence[int],
         dropout: float = 0.0,
-        action_std_init: float = 0.05,
         device_type_embedding_dim: int = 8,
     ) -> None:
         super().__init__()
+        widths = tuple(hidden_channels)
         self.encoder = GNNEncoder(
             in_channels=in_channels,
-            hidden_channels=hidden_channels,
+            hidden_channels=widths,
             dropout=dropout,
         )
-
-        self.bus_head = nn.Linear(hidden_channels, 2)
+        last_hidden = widths[-1]
+        self.bus_head = nn.Linear(last_hidden, 2)
         self.device_type_embedding = nn.Embedding(3, device_type_embedding_dim)  # 3 device types
         self.device_head = nn.Sequential(
-            nn.Linear(hidden_channels + device_type_embedding_dim, hidden_channels),
+            nn.Linear(last_hidden + device_type_embedding_dim, last_hidden),
             nn.Tanh(),
-            nn.Linear(hidden_channels, 2),
+            nn.Linear(last_hidden, 2),
         )
-
-        self.bus_log_std = nn.Parameter(torch.full((2,), math.log(action_std_init)))
-        self.device_log_std = nn.Parameter(torch.full((2,), math.log(action_std_init)))
 
     def forward(
         self,
@@ -93,9 +85,7 @@ class VoltageWarmStartActor(nn.Module):
         device_type_id: Tensor,
     ) -> WarmStartAction:
         h = self.encoder(x, edge_index)
-
         bus = torch.sigmoid(self.bus_head(h))
-
         if device_bus_index.numel() == 0:
             device = h.new_empty((0, 2))
         else:
@@ -111,19 +101,18 @@ class VoltageWarmStartActor(nn.Module):
         edge_index: Tensor | None,
         device_bus_index: Tensor | None,
         device_type_id: Tensor | None,
+        action_std: float,
     ) -> WarmStartDistribution:
         if x is None or edge_index is None or device_bus_index is None or device_type_id is None:
             raise ValueError("Data Tensors must not be None")
         mean = self.forward(x, edge_index, device_bus_index, device_type_id)
-
-        bus_std = torch.exp(self.bus_log_std).clamp(min=1e-3, max=0.5)
-        bus_dist = Normal(mean.bus, bus_std.expand_as(mean.bus))
-
+        bus_std = torch.full_like(mean.bus, action_std).clamp(min=1e-6)
+        bus_dist = Normal(mean.bus, bus_std)
         if mean.device.numel() == 0:
             device_dist = None
         else:
-            device_std = torch.exp(self.device_log_std).clamp(min=1e-3, max=0.5)
-            device_dist = Normal(mean.device, device_std.expand_as(mean.device))
+            device_std = torch.full_like(mean.device, action_std).clamp(min=1e-6)
+            device_dist = Normal(mean.device, device_std)
 
         return WarmStartDistribution(bus=bus_dist, device=device_dist)
 
@@ -132,19 +121,24 @@ class VoltageWarmStartCritic(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        hidden_channels: int = 128,
+        hidden_channels: Sequence[int],
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+
+        widths = tuple(hidden_channels)
+
         self.encoder = GNNEncoder(
             in_channels=in_channels,
-            hidden_channels=hidden_channels,
+            hidden_channels=widths,
             dropout=dropout,
         )
+
+        last_hidden = widths[-1]
         self.value_head = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels),
+            nn.Linear(last_hidden, last_hidden),
             nn.Tanh(),
-            nn.Linear(hidden_channels, 1),
+            nn.Linear(last_hidden, 1),
         )
 
     def forward(self, x: Tensor, edge_index: Tensor, batch: Tensor | None = None) -> Tensor:
@@ -215,7 +209,6 @@ def save_actor(
                 "in_channels": input_channels,
                 "hidden_channels": cfg.model.hidden_channels,
                 "dropout": cfg.model.dropout,
-                "action_std_init": cfg.model.action_std_init,
                 "device_type_embedding_dim": cfg.model.device_type_embedding_dim,
             },
             "full_cfg": cfg.model_dump(),

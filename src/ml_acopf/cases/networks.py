@@ -12,7 +12,6 @@ from ..utils import optional_string
 CASE_FILES: dict[str, str] = {
     "case14": "pglib_opf_case14_ieee.m",
     "case30": "pglib_opf_case30_ieee.m",
-    "case57": "pglib_opf_case57_ieee.m",
     "case118": "pglib_opf_case118_ieee.m",
     "case300": "pglib_opf_case300_ieee.m",
     "case118_sad": "pglib_opf_case118_ieee_sad.m",
@@ -82,10 +81,10 @@ def build_network(name: str) -> pandapowerNet:
     net = from_mpc(str(path), validate_conversion=False)
     if len(net.ext_grid) > 0:
         net.ext_grid["controllable"] = True
-    if len(net.gen) > 0:
-        net.gen["controllable"] = True
-    if len(net.sgen) > 0:
-        net.sgen["controllable"] = True
+    # if len(net.gen) > 0:
+    #     net.gen["controllable"] = True
+    # if len(net.sgen) > 0:
+    #     net.sgen["controllable"] = True
     return net
 
 

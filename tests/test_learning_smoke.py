@@ -33,8 +33,8 @@ def test_learning_smoke() -> None:
         y_device=torch.tensor([[0.5, 0.5]], dtype=torch.float32),
     )
 
-    actor = VoltageWarmStartActor(in_channels=6, hidden_channels=32)
-    critic = VoltageWarmStartCritic(in_channels=6, hidden_channels=32)
+    actor = VoltageWarmStartActor(in_channels=6, hidden_channels=(32, 32, 32))
+    critic = VoltageWarmStartCritic(in_channels=6, hidden_channels=(32, 32, 32))
     agent = PPOAgent(actor=actor, critic=critic, config=PPOConfig())
 
     action, log_prob, value = agent.act(graph, stochastic=True)

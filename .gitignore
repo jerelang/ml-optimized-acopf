@@ -218,3 +218,4 @@ dist/
 outputs/
 *.parquet
 .juliapkg/**/*
+pglib-opf/

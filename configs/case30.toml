@@ -1,7 +1,7 @@
 [data]
 name = "pglib_case30_standard"
 network_name = "case30"
-n_cases = 1000
+n_cases = 1
 seed = 123
 max_attempts_multiplier = 10
 

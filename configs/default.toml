@@ -1,50 +1,69 @@
 [data]
-name = "pglib_case14_test"
+name = "paper_case14_ppo"
 network_name = "case14"
-n_cases = 200
+n_cases = 20000
 seed = 123
-max_attempts_multiplier = 5
+max_attempts_multiplier = 10
 
 [perturb]
-load_scale_min = 0.95
-load_scale_max = 1.05
-local_load_noise_scale = 0.05
-reactive_noise_scale = 0.02
+load_scale_min = 0.80
+load_scale_max = 1.20
+local_load_noise_scale = 0.10
+reactive_noise_scale = 0.05
+
+[solver]
+pm_solver = "ipopt"
+pm_tol = 1e-8
+pm_log_level = 0
+delta = 1e-8
+calculate_voltage_angles = true
+check_connectivity = true
+correct_pm_network_data = false
+silence = true
+delete_buffer_file = true
+opf_flow_lim = "S"
 
 [model]
-hidden_channels = 64
+hidden_channels = [128, 256, 128]
 dropout = 0.0
 device_type_embedding_dim = 4
-action_std_init = 0.02
 
 [pretrain]
-epochs = 40
-batch_size = 16
+epochs = 1
+batch_size = 64
 learning_rate = 1e-3
 weight_decay = 0.0
 
 [ppo]
-updates = 30
-rollout_size = 32
-learning_rate = 5e-5
+updates = 100
+rollout_size = 1000
+learning_rate = 5e-6
 clip_ratio = 0.1
 value_loss_weight = 0.5
-entropy_weight = 0.0
-ppo_epochs = 4
+entropy_weight = 0.01
+ppo_epochs = 100
 max_grad_norm = 1.0
-nonconvergence_penalty = 30.0
+nonconvergence_penalty = 12.0
 seed = 123
 
+action_std_init = 0.25
+action_std_decay_rate = 0.01
+action_std_decay_every_steps = 250
+action_std_min = 0.0
+
+[normalization]
+max_voltage_angle_deg = 60.0
+
 [search]
-hidden_channels = [64, 128]
-ppo_learning_rate = [5e-5, 1e-4]
-ppo_entropy_weight = [0.0, 1e-4]
-nonconvergence_penalty = [30]
+hidden_channels = [[128, 256, 128]]
+ppo_learning_rate = [5e-6]
+ppo_entropy_weight = [0.01]
+nonconvergence_penalty = [12]
 
 [benchmark]
 network_names = ["case14"]
-n_cases = 500
+n_cases = 5000
 seed = 123
 include_flat = true
-include_pf = true
+include_pf = false
 create_plots = true
