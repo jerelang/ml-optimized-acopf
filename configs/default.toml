@@ -6,6 +6,7 @@ seed = 123
 max_attempts_multiplier = 10
 
 [perturb]
+# still only an approximation of the notebook's load generation
 load_scale_min = 0.80
 load_scale_max = 1.20
 local_load_noise_scale = 0.10
@@ -24,11 +25,12 @@ delete_buffer_file = true
 opf_flow_lim = "S"
 
 [model]
-hidden_channels = [128, 256, 128]
+hidden_channels = [64, 128, 64]
 dropout = 0.0
 device_type_embedding_dim = 4
 
 [pretrain]
+# ignored unless you explicitly turn pretraining on
 epochs = 1
 batch_size = 64
 learning_rate = 1e-3
@@ -43,9 +45,8 @@ value_loss_weight = 0.5
 entropy_weight = 0.01
 ppo_epochs = 100
 max_grad_norm = 1.0
-nonconvergence_penalty = 12.0
+nonconvergence_penalty = 5.0
 seed = 123
-
 action_std_init = 0.25
 action_std_decay_rate = 0.01
 action_std_decay_every_steps = 250
@@ -55,10 +56,10 @@ action_std_min = 0.0
 max_voltage_angle_deg = 60.0
 
 [search]
-hidden_channels = [[128, 256, 128]]
+hidden_channels = [[64, 128, 64]]
 ppo_learning_rate = [5e-6]
 ppo_entropy_weight = [0.01]
-nonconvergence_penalty = [12]
+nonconvergence_penalty = [5]
 
 [benchmark]
 network_names = ["case14"]
