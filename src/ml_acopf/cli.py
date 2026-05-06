@@ -218,9 +218,9 @@ def train_command(
 
     if plot:
         created: list[Path] = []
-
-        if (out / "pretrain_history.parquet").exists():
-            created.append(plot_pretrain_history(out))
+        if pretrain:
+            if (out / "pretrain_history.parquet").exists():
+                created.append(plot_pretrain_history(out))
         if (out / "ppo_history.parquet").exists():
             created.extend(plot_ppo_history(out))
 
