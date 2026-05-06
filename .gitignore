@@ -215,7 +215,5 @@ notebooks/**/*
 build/
 dist/
 *.egg-info/
-outputs/
-*.parquet
 .juliapkg/**/*
 pglib-opf/

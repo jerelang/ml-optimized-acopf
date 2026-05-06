@@ -5,10 +5,11 @@ from pathlib import Path
 import polars as pl
 
 from ml_acopf.cases.generate import generate_cases
+from ml_acopf.cli import ensure_julia_ready
 from ml_acopf.config import Config, DataConfig, PerturbConfig, SolverConfig
 
 
-def test_generate_cases_smoke(tmp_path, monkeypatch) -> None:
+def test_generate_cases(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     cfg = Config(
         data=DataConfig(
@@ -16,15 +17,15 @@ def test_generate_cases_smoke(tmp_path, monkeypatch) -> None:
             network_name="case14",
             n_cases=1,
             seed=123,
-            max_attempts_multiplier=2,
+            max_attempts_multiplier=100,
         ),
         perturb=PerturbConfig(
-            load_scale_min=0.9,
-            load_scale_max=1.1,
+            load_scale_min=0.95,
+            load_scale_max=1.05,
         ),
         solver=SolverConfig(pm_tol=1e-7),
     )
-
+    ensure_julia_ready()
     summary = generate_cases(cfg)
 
     dataset_dir = Path("data/test_dataset/baseline")

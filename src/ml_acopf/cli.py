@@ -176,7 +176,8 @@ def train_command(
         history=pretrain_history,
         out=out,
     )
-    write_parquet(pl.DataFrame(pretrain_history), out / "pretrain_history.parquet")
+    if pretrain:
+        write_parquet(pl.DataFrame(pretrain_history), out / "pretrain_history.parquet")
 
     critic = VoltageWarmStartCritic(
         in_channels=ppo_dataset.input_channels,
@@ -242,6 +243,10 @@ def benchmark_command(
             readable=True,
         ),
     ],
+    config: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", exists=True, dir_okay=False, readable=True),
+    ] = None,
     out: Annotated[
         Path,
         typer.Option(
@@ -256,13 +261,18 @@ def benchmark_command(
     import torch
 
     from .benchmark import run_benchmark, summarize_benchmark
-    from .config import Config
+    from .config import Config, load_config
     from .learning.models import WarmStartPredictor, load_actor
     from .plotting import plot_benchmark_results
     from .utils import make_run_name, print_rich, write_parquet
 
     checkpoint = torch.load(actor_path, map_location="cpu")
-    cfg = Config.model_validate(checkpoint["full_cfg"])
+
+    # overwrite config stored in actor snapshot if config is provided
+    if config:
+        cfg = load_config(config)
+    else:
+        cfg = Config.model_validate(checkpoint["full_cfg"])
 
     actor = load_actor(actor_path)
     device = torch.device("cpu")

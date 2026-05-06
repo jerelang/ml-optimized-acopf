@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 import pandapower as pp
 import polars as pl
+from tqdm import tqdm
 
 from .cases.generate import (
     apply_bus_load_profile,
@@ -93,7 +94,7 @@ def run_benchmark(
         buses_static, edges_static = export_static_tables(base_net)
         device_metadata = export_device_metadata(base_net)
 
-        for sample_index in range(n_cases):
+        for sample_index in tqdm(range(n_cases), desc="Number of fresh cases"):
             profile = sample_bus_load_profile(
                 base_net,
                 rng,
