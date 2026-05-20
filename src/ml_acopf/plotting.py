@@ -42,7 +42,7 @@ def plot_ppo_history(run_dir: Path | str) -> list[Path]:
     for column, ylabel, filename in [
         ("mean_reward", "Mean reward", "ppo_mean_reward.png"),
         ("success_rate", "Success rate", "ppo_success_rate.png"),
-        ("mean_solve_time", "Mean solve time", "ppo_mean_solve_time.png"),
+        ("mean_solve_time", "Mean solve time [s]", "ppo_mean_solve_time.png"),
     ]:
         if column not in history.columns:
             continue
@@ -84,13 +84,24 @@ def plot_benchmark_results(benchmark_file: Path | str) -> list[Path]:
     )
     outputs.append(success_rate_path)
 
-    if "total_time_s_mean" in summary.columns:
-        total_time_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_mean.png")
+    if "wall_time_s_mean" in summary.columns:
+        total_time_path = benchmark_path.with_name(f"{benchmark_path.stem}_wall_time_mean.png")
         _plot_grouped_bar(
             summary,
-            value_column="total_time_s_mean",
-            ylabel="Mean total time [s]",
-            title="Benchmark mean total time by method",
+            value_column="wall_time_s_mean",
+            ylabel="Mean wall time [s]",
+            title="Benchmark mean wall time by method",
+            output_path=total_time_path,
+        )
+        outputs.append(total_time_path)
+
+    if "wall_time_s_median" in summary.columns:
+        total_time_path = benchmark_path.with_name(f"{benchmark_path.stem}wall_time_median.png")
+        _plot_grouped_bar(
+            summary,
+            value_column="wall_time_s_median",
+            ylabel="Mean wall time [s]",
+            title="Benchmark median wall time by method",
             output_path=total_time_path,
         )
         outputs.append(total_time_path)

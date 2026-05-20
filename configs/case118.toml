@@ -65,5 +65,5 @@ network_names = ["case118"]
 n_cases = 5000
 seed = 123
 include_flat = true
-include_pf = false
+include_pf = true
 create_plots = true
