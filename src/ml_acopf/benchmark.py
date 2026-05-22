@@ -207,26 +207,23 @@ def summarize_benchmark(frame: pl.DataFrame) -> pl.DataFrame:
         return frame
 
     group_by = ["network_name"]
-    if "method" in frame.columns:
-        group_by.append("method")
+    group_by.append("method")
 
     aggregations = [
         pl.len().alias("n_cases"),
         pl.col("success").cast(pl.Float64).mean().alias("success_rate"),
         pl.col("wall_time_s").mean().alias("wall_time_s_mean"),
-        pl.col("wall_time_s").median().alias("wall_time_s_median"),
         pl.col("solver_time_s").mean().alias("solver_time_s_mean"),
         pl.col("objective").mean().alias("objective_mean"),
     ]
-
-    if "prep_time_s" in frame.columns:
-        aggregations.extend(
-            [
-                pl.col("prep_time_s").mean().alias("prep_time_s_mean"),
-                pl.col("total_time_s").mean().alias("total_time_s_mean"),
-            ]
-        )
-
+    aggregations.extend(
+        [
+            pl.col("prep_time_s").mean().alias("prep_time_s_mean"),
+            pl.col("total_time_s").mean().alias("total_time_s_mean"),
+            pl.col("total_time_s").median().alias("total_time_s_median"),
+            pl.col("total_time_s").quantile(0.9).alias("total_time_s_p90"),
+        ]
+    )
     return frame.group_by(group_by).agg(*aggregations).sort(group_by)
 
 

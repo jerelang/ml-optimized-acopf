@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import polars as pl
@@ -84,39 +85,66 @@ def plot_benchmark_results(benchmark_file: Path | str) -> list[Path]:
     )
     outputs.append(success_rate_path)
 
-    if "wall_time_s_mean" in summary.columns:
-        total_time_path = benchmark_path.with_name(f"{benchmark_path.stem}_wall_time_mean.png")
-        _plot_grouped_bar(
-            summary,
-            value_column="wall_time_s_mean",
-            ylabel="Mean wall time [s]",
-            title="Benchmark mean wall time by method",
-            output_path=total_time_path,
-        )
-        outputs.append(total_time_path)
+    total_mean_time_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_mean.png")
+    _plot_grouped_bar(
+        summary,
+        value_column="total_time_s_mean",
+        ylabel="Mean total time [s]",
+        title="Benchmark mean total time by method",
+        output_path=total_mean_time_path,
+    )
+    outputs.append(total_mean_time_path)
 
-    if "wall_time_s_median" in summary.columns:
-        total_time_path = benchmark_path.with_name(f"{benchmark_path.stem}wall_time_median.png")
-        _plot_grouped_bar(
-            summary,
-            value_column="wall_time_s_median",
-            ylabel="Mean wall time [s]",
-            title="Benchmark median wall time by method",
-            output_path=total_time_path,
-        )
-        outputs.append(total_time_path)
+    total_p90_time_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_p90.png")
+    _plot_grouped_bar(
+        summary,
+        value_column="total_time_s_p90",
+        ylabel="P90 total time [s]",
+        title="Benchmark P90 total time by method",
+        output_path=total_p90_time_path,
+    )
+    outputs.append(total_p90_time_path)
 
-    if "total_time_s" in frame.columns:
-        boxplot_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_boxplot.png")
-        if _plot_boxplot_by_group(
-            frame,
-            value_column="total_time_s",
-            ylabel="Total time [s]",
-            title="Benchmark total time distribution",
-            output_path=boxplot_path,
-        ):
-            outputs.append(boxplot_path)
+    total_median_time_path = benchmark_path.with_name(f"{benchmark_path.stem}total_time_median.png")
+    _plot_grouped_bar(
+        summary,
+        value_column="total_time_s_median",
+        ylabel="Median total time [s]",
+        title="Benchmark median total time by method",
+        output_path=total_median_time_path,
+    )
+    outputs.append(total_median_time_path)
 
+    boxplot_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_boxplot.png")
+    _plot_boxplot_by_group(
+        frame,
+        value_column="total_time_s",
+        ylabel="total time [s]",
+        title="Benchmark total time distribution",
+        output_path=boxplot_path,
+    )
+    outputs.append(boxplot_path)
+
+    violin_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_violinplot.png")
+    _plot_boxplot_by_group(
+        frame,
+        value_column="total_time_s",
+        ylabel="total time [s]",
+        title="Benchmark total time distribution",
+        plot_type="violin",
+        output_path=violin_path,
+    )
+    outputs.append(violin_path)
+
+    dist_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_dist.png")
+    _plot_boxplot_by_group(
+        frame,
+        value_column="total_time_s",
+        ylabel="total time [s]",
+        title="Benchmark total time histogram",
+        output_path=dist_path,
+    )
+    outputs.append(dist_path)
     return outputs
 
 
@@ -129,21 +157,15 @@ def _plot_grouped_bar(
     output_path: Path,
 ) -> None:
     df = summary.to_pandas()
-    hue = "method" if "method" in summary.columns else None
-
     fig, ax = plt.subplots()
     sns.barplot(
         data=df,
-        x="network_name",
+        x="method",
         y=value_column,
-        hue=hue,
         ax=ax,
     )
-    ax.set_xlabel("Network")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    if hue:
-        ax.legend(title="Method")
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
@@ -155,6 +177,7 @@ def _plot_boxplot_by_group(
     value_column: str,
     ylabel: str,
     title: str,
+    plot_type: Literal["box", "violin"] = "box",
     output_path: Path,
 ) -> bool:
     df = frame.select(["network_name", "method", value_column]).drop_nulls().to_pandas()
@@ -164,18 +187,40 @@ def _plot_boxplot_by_group(
     df["group"] = df["network_name"] + "\n" + df["method"]
 
     fig, ax = plt.subplots()
-    sns.boxplot(
-        data=df,
-        x="group",
-        y=value_column,
-        ax=ax,
-    )
+    if plot_type == "box":
+        sns.boxplot(data=df, x="group", y=value_column, ax=ax, showmeans=True)
+    else:
+        assert plot_type == "violin"
+        sns.violinplot(data=df, x="group", y=value_column, ax=ax, cut=0)
     ax.set_yscale("log")
     ax.set_xlabel("")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    ax.tick_params(axis="x", rotation=35)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     return True
+
+
+def _plot_dist(
+    summary: pl.DataFrame,
+    *,
+    value_column: str,
+    ylabel: str,
+    title: str,
+    output_path: Path,
+) -> None:
+    df = summary.to_pandas()
+    fig, ax = plt.subplots()
+    sns.barplot(
+        data=df,
+        x="method",
+        y=value_column,
+        ax=ax,
+    )
+    sns.displot(df, x=value_column, hue="method", ax=ax, fill=True, bins=100, log_scale=True)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)

@@ -1,12 +1,11 @@
 [data]
-name = "paper_case14_ppo"
+name = "test14_ppo"
 network_name = "case14"
-n_cases = 20000
+n_cases = 20
 seed = 123
 max_attempts_multiplier = 10
 
 [perturb]
-# still only an approximation of the notebook's load generation
 load_scale_min = 0.80
 load_scale_max = 1.20
 local_load_noise_scale = 0.10
@@ -30,15 +29,15 @@ dropout = 0.0
 device_type_embedding_dim = 4
 
 [pretrain]
-# ignored unless you explicitly turn pretraining on
+# ignored unless pretraining flag is set
 epochs = 1
 batch_size = 64
 learning_rate = 1e-3
 weight_decay = 0.0
 
 [ppo]
-updates = 100
-rollout_size = 1000
+updates = 10
+rollout_size = 100
 learning_rate = 5e-6
 clip_ratio = 0.1
 value_loss_weight = 0.5
@@ -63,8 +62,8 @@ nonconvergence_penalty = [5]
 
 [benchmark]
 network_names = ["case14"]
-n_cases = 5000
+n_cases = 50
 seed = 123
 include_flat = true
-include_pf = true
+include_pf = false
 create_plots = true

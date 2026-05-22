@@ -1,32 +1,90 @@
-# ml-assisted-acopf
+# ML-Optimized AC-OPF Warm Starts
 
-Generate solved AC-OPF cases, train a GNN warm-start actor with supervised pretraining and PPO, and benchmark flat, PF, and actor warm starts.
+The broad goal of this repo is to provide a framework for learning and benchmarking **machine-learning warm starts** for **AC optimal power flow (AC-OPF)** using **pandapower** with the **PandaModels/PowerModels** solver.
 
-## Supported PGLIB-OPF networks
+The current implementation follows the **PPO + GNN warm-start idea** from  
+**Azad Deihim et al., _Initial estimate of AC optimal power flow with graph neural networks_ (Electric Power Systems Research, 2024)**, but is based on a structured framework and uses the **PandaModels/PowerModels solver stack** instead of the original **PyPower solver**.
+Case generation, training, benchmarking, and plotting are separated so that additional methods can be added without rewriting the full pipeline.
+
+So far, this repo implements:
+
+- **PGLib-OPF** benchmark case import through **pandapower**
+- generation of perturbed AC-OPF datasets
+- **GNN + PPO** warm-start learning of the primal variables (voltage magnitude/angle, P, Q)
+- optional **supervised pretraining**
+- benchmarking against:
+  - **flat start**
+  - **power-flow warm start**
+
+## Current benchmark snapshot
+
+Benchmark result on **`PGLib-OPF case118 and case14`**, using a similar configuration as **Deihim et al.'s** paper:
+
+| Network | Method | Mean total time [s] | P90 total time [s] | Median total time [s] |
+|---|---|---:|---:|---:|
+| case118 | Flat | 2.950 | 3.640 | 3.259 |
+| case118 | PF | 2.582 | 8.109 | 1.226 |
+| case118 | GNN + PPO | 1.060 | 1.652 | 0.938 |
+| case14 | Flat | 0.094 | 0.136 | 0.089 |
+| case14 | PF | 0.068 | 0.087 | 0.067 |
+| case14 | GNN + PPO | 0.070 | 0.098 | 0.065 |
+
+
+All benchmark timings were measured on this machine (idle):
+- OS: Fedora 44 KDE
+- CPU: AMD Ryzen 7 7700X
+- RAM: 16 GB
+- GPU: NVIDIA RTX 4060 TI (16GB VRAM)
+
+
+### Solver-time distribution
+![case118 ECDF](docs/paper_case118_ppo/benchmark/118_hist.svg)
+
+This benchmark on 5000 perturbed cases shows that the learned warm start reduces end-to-end solve time relative to both **flat** and **PF-based** initialization on `case118`. The gain is especially visible in the tail of the runtime distribution: while PF is competitive on median time, it has substantially worse **P90** behavior than the learned method. More figures, training diagnostics and the full benchmark data can be found in the [docs](docs) folder.
+
+## Supported PGLib-OPF benchmark cases
+## Supported PGLib-OPF benchmark cases
 
 - `case14`
 - `case30`
-- `case57`
 - `case118`
 - `case300`
-- `case118.api`
-- `case118.sad`
+- `case118_api`
+- `case118_sad`
+- `case118_api`
+- `case118_sad`
 
-## Install
+## Installation
+## Installation
 
-Main dependencies:
+Install the main dependencies:
+Install the main dependencies:
 
 ```bash
 uv sync
 ```
 
-With development dependencies:
+Install development dependencies:
+Install development dependencies:
 
 ```bash
 uv sync --group dev
 ```
 
-## Workflow
+## Basic workflow
+
+List available benchmark cases:
+
+```bash
+uv run ml_acopf list-networks
+```
+## Basic workflow
+
+List available benchmark cases:
+
+```bash
+uv run ml_acopf list-networks
+```
 
 Generate a solved dataset:
 
@@ -34,13 +92,8 @@ Generate a solved dataset:
 uv run ml_acopf generate-cases --config configs/default.toml
 ```
 
-This writes the dataset to:
-
-```bash
-data/<data.name>/baseline/
-```
-
-Run a basic 2-phase grid search for finding good hyperparameters:
+Run a basic hyperparameter search:
+Run a basic hyperparameter search:
 
 ```bash
 uv run ml_acopf search \
@@ -48,13 +101,8 @@ uv run ml_acopf search \
   --out outputs/search
 ```
 
-This writes the best searched actor to:
-
-```bash
-outputs/search/<run_name>/agent_ppo.pt
-```
-
-Pretrain the actor GNN and then train with PPO on the generated dataset:
+Train a model:
+Train a model:
 
 ```bash
 uv run ml_acopf train \
@@ -62,27 +110,28 @@ uv run ml_acopf train \
   --out outputs/models
 ```
 
-This writes the actor to:
+Enable supervised pretraining if desired (disabled by default):
+Enable supervised pretraining if desired (disabled by default):
 
 ```bash
-outputs/models/<run_name>/agent_ppo.pt
+uv run ml_acopf train \
+  --config configs/default.toml \
+  --out outputs/models \
+  --pretrain
+uv run ml_acopf train \
+  --config configs/default.toml \
+  --out outputs/models \
+  --pretrain
 ```
-Benchmark flat, PF, and actor predicted warm starts:
+
+Benchmark flat, PF, and learned warm starts:
+
+Benchmark flat, PF, and learned warm starts:
 
 ```bash
 uv run ml_acopf benchmark \
   outputs/models/<run_name>/agent_ppo.pt \
   --out outputs/results
-```
-
-This writes the benchmark outputs to:
-
-```bash
-outputs/results/<run_name>_benchmark.parquet
-outputs/results/<run_name>_benchmark_summary.parquet
-outputs/results/<run_name>_benchmark_success_rate.png
-outputs/results/<run_name>_benchmark_total_time_mean.png
-outputs/results/<run_name>_benchmark_total_time_boxplot.png
 ```
 
 Create training plots for a saved run:
@@ -94,21 +143,126 @@ uv run ml_acopf plot-training outputs/models/<run_name>
 Create benchmark plots for a saved benchmark file:
 
 ```bash
-uv run ml_acopf plot-benchmark outputs/results/<run_name>_benchmark.parquet
+uv run ml_acopf plot-benchmark \
+  outputs/results/<run_name>/<run_name>_benchmark.parquet
+uv run ml_acopf plot-benchmark \
+  outputs/results/<run_name>/<run_name>_benchmark.parquet
 ```
 
-## Config notes
+## Output layout
 
-- `[normalization].max_voltage_angle_deg` sets one fixed symmetric angle range `[-x, x]` for voltage-angle normalization.
-- `[benchmark]` controls fresh-case benchmarking and optional plot generation.
+### Generated datasets
+Case generation writes to:
 
-## Data layout
+```bash
+data/<data.name>/baseline/
+```
 
-Case generation writes to `data/<data.name>/baseline/`:
+Layout:
+## Output layout
 
-- `cases.parquet`: solved case metadata
-- `load_inputs.parquet`: per-load perturbed inputs
-- `bus_targets.parquet`: per-bus solved OPF targets
-- `dispatch_targets.parquet`: per-device solved OPF targets
-- `buses_static.parquet`: static bus graph features
-- `edges_static.parquet`: static edge graph features
+### Generated datasets
+Case generation writes to:
+
+```bash
+data/<data.name>/baseline/
+```
+
+Layout:
+
+- `cases.parquet` – converged case metadata
+- `attempted_cases.parquet` – all attempted cases
+- `load_inputs.parquet` – per-load perturbed inputs for converged cases
+- `attempted_load_inputs.parquet` – per-load perturbed inputs for all attempts
+- `bus_targets.parquet` – per-bus solved OPF targets
+- `dispatch_targets.parquet` – per-device solved OPF targets
+- `buses_static.parquet` – static bus graph features
+- `edges_static.parquet` – static edge graph features
+- `device_metadata.parquet` – static device features / bounds
+
+### Training outputs
+Training writes to:
+
+```bash
+outputs/models/<run_name>/
+```
+
+Layout:
+
+- `agent_ppo.pt`
+- `ppo_history.parquet`
+- `pretrain_history.parquet` (if pretraining is enabled)
+- training plots as PNG files
+
+Search runs write to:
+
+```bash
+outputs/search/<run_name>/
+```
+
+### Benchmark outputs
+Benchmarking writes to:
+
+```bash
+outputs/results/<run_name>/
+```
+
+Layout:
+
+- `<run_name>_benchmark.parquet`
+- `<run_name>_benchmark_summary.parquet`
+- benchmark plots as PNG files
+
+
+## TO-DO
+- [ ] case 300 test
+- [ ] add method that predicts full solver state, not only primal variables
+- [ ] time-series scenario generation
+- `cases.parquet` – converged case metadata
+- `attempted_cases.parquet` – all attempted cases
+- `load_inputs.parquet` – per-load perturbed inputs for converged cases
+- `attempted_load_inputs.parquet` – per-load perturbed inputs for all attempts
+- `bus_targets.parquet` – per-bus solved OPF targets
+- `dispatch_targets.parquet` – per-device solved OPF targets
+- `buses_static.parquet` – static bus graph features
+- `edges_static.parquet` – static edge graph features
+- `device_metadata.parquet` – static device features / bounds
+
+### Training outputs
+Training writes to:
+
+```bash
+outputs/models/<run_name>/
+```
+
+Layout:
+
+- `agent_ppo.pt`
+- `ppo_history.parquet`
+- `pretrain_history.parquet` (if pretraining is enabled)
+- training plots as PNG files
+
+Search runs write to:
+
+```bash
+outputs/search/<run_name>/
+```
+
+### Benchmark outputs
+Benchmarking writes to:
+
+```bash
+outputs/results/<run_name>/
+```
+
+Layout:
+
+- `<run_name>_benchmark.parquet`
+- `<run_name>_benchmark_summary.parquet`
+- benchmark plots as PNG files
+
+
+## TO-DO
+- [ ] case 300 test
+- [ ] add method that predicts full solver state, not only primal variables
+- [ ] time-series scenario generation

@@ -1,49 +1,69 @@
 [data]
-name = "pglib_case118_sad"
+name = "paper_case118_ppo_sad"
 network_name = "case118_sad"
-n_cases = 500
+n_cases = 20000
 seed = 123
-max_attempts_multiplier = 20
+max_attempts_multiplier = 10
 
 [perturb]
-load_scale_min = 0.99
-load_scale_max = 1.01
-local_load_noise_scale = 0.01
-reactive_noise_scale = 0.005
+load_scale_min = 0.90
+load_scale_max = 1.10
+local_load_noise_scale = 0.05
+reactive_noise_scale = 0.03
+
+[solver]
+pm_solver = "ipopt"
+pm_tol = 1e-8
+pm_log_level = 0 
+delta = 1e-8
+calculate_voltage_angles = true
+check_connectivity = true
+correct_pm_network_data = false
+silence = true
+delete_buffer_file = true
+opf_flow_lim = "S"
 
 [model]
-hidden_channels = 256
+hidden_channels = [256, 512, 256]
 dropout = 0.0
 device_type_embedding_dim = 4
-action_std_init = 0.005
 
 [pretrain]
-epochs = 75
-batch_size = 16
+# ignored unless pretraining flag is set
+epochs = 1
+batch_size = 64
 learning_rate = 1e-3
 weight_decay = 0.0
 
 [ppo]
-updates = 300
-rollout_size = 32
-learning_rate = 1e-5
+updates = 100
+rollout_size = 1000
+learning_rate = 5e-6
 clip_ratio = 0.1
 value_loss_weight = 0.5
-entropy_weight = 0.0
-ppo_epochs = 4
+entropy_weight = 0.01
+ppo_epochs = 100
 max_grad_norm = 1.0
-nonconvergence_penalty = 50.0
+nonconvergence_penalty = 12.0
 seed = 123
 
+action_std_init = 0.25
+action_std_decay_rate = 0.01
+action_std_decay_every_steps = 250
+action_std_min = 0.0
+
+[normalization]
+max_voltage_angle_deg = 60.0
+
 [search]
-hidden_channels = [128, 256]
-ppo_learning_rate = [3e-5, 5e-5]
-ppo_entropy_weight = [0.0]
-nonconvergence_penalty = [50]
+hidden_channels = [[256, 512, 256]]
+ppo_learning_rate = [5e-6]
+ppo_entropy_weight = [0.01]
+nonconvergence_penalty = [12]
 
 [benchmark]
 network_names = ["case118_sad"]
-n_cases = 500
+n_cases = 5000
 seed = 123
 include_flat = true
 include_pf = true
