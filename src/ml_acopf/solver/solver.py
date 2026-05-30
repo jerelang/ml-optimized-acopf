@@ -32,6 +32,9 @@ def solve_ac_opf(
     settings: SolverConfig,
     warmstart: WarmStartPayload | None = None,
 ) -> SolveStats:
+    """Solve AC-OPF with PandaModels/PowerModels and optional warm-start data.
+    Returns solve statistics for benchmarking and training.
+    """
     pp_to_pm_callback = None
     if warmstart is not None and not warmstart.is_empty:
         pp_to_pm_callback = make_pp_to_pm_callback(warmstart)

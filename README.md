@@ -2,9 +2,7 @@
 
 The broad goal of this repo is to provide a framework for learning and benchmarking **machine-learning warm starts** for **AC optimal power flow (AC-OPF)** using **pandapower** with the **PandaModels/PowerModels** solver.
 
-The current implementation follows the **PPO + GNN warm-start idea** from  
-**Azad Deihim et al., _Initial estimate of AC optimal power flow with graph neural networks_ (Electric Power Systems Research, 2024)**, but is based on a structured framework and uses the **PandaModels/PowerModels solver stack** instead of the original **PyPower solver**.
-Case generation, training, benchmarking, and plotting are separated so that additional methods can be added without rewriting the full pipeline.
+The current implementation follows the PPO + GNN warm-start idea from Azad Deihim et al., Initial estimate of AC optimal power flow with graph neural networks (Electric Power Systems Research, 2024), but is built as a structured and reusable framework and uses the PandaModels/PowerModels solver stack instead of the original PyPower solver. In the original paper, both the actor and critic are implemented as GNNs, and the actor predicts warm-start values for voltage magnitude, voltage angle, and active/reactive power variables before passing them to PyPower’s AC-OPF solver. Although the method they used is PPO, the underlying problem is effectively a contextual bandit rather than a sequential reinforcement-learning task, as each episode consists of a single step on an independently sampled case. Therefore, there is no temporal reward dependency over multiple steps, and the discount factor \gamma they mention has no effect in this setting.
 
 So far, this repo implements:
 
@@ -18,7 +16,12 @@ So far, this repo implements:
 
 ## Current benchmark snapshot
 
-Benchmark result on **`PGLib-OPF case118 and case14`**, using a similar configuration as **Deihim et al.'s** paper:
+Benchmark results on **`PGLib-OPF case118`** and **`case14`**, using **paper-inspired** PPO + GNN settings based on **Deihim et al.**, using **PandaModels/PowerModels + Ipopt** instead of the original **PyPower** solver stack.
+
+Exact configs for the runs shown here:
+- [`configs/paper_case14_ppo.toml`](configs/paper_case14_ppo.toml)
+- [`configs/paper_case118_ppo.toml`](configs/paper_case118_ppo.toml)
+
 
 | Network | Method | Mean total time [s] | P90 total time [s] | Median total time [s] |
 |---|---|---:|---:|---:|
@@ -40,9 +43,8 @@ All benchmark timings were measured on this machine (idle):
 ### Solver-time distribution
 ![case118 ECDF](docs/paper_case118_ppo/benchmark/118_hist.svg)
 
-This benchmark on 5000 perturbed cases shows that the learned warm start reduces end-to-end solve time relative to both **flat** and **PF-based** initialization on `case118`. The gain is especially visible in the tail of the runtime distribution: while PF is competitive on median time, it has substantially worse **P90** behavior than the learned method. More figures, training diagnostics and the full benchmark data can be found in the [docs](docs) folder.
+This benchmark on 5000 perturbed cases shows that the learned warm start reduces end-to-end solve time relative to both **flat** and **PF-based** initialization on `case118`. The gain is especially visible in the tail of the runtime distribution: while PF is competitive on median time, it has substantially worse **P90** behavior than the learned method. More figures, training diagnostics and a summary of the benchmark data can be found in the [docs](docs) folder.
 
-## Supported PGLib-OPF benchmark cases
 ## Supported PGLib-OPF benchmark cases
 
 - `case14`
@@ -51,33 +53,21 @@ This benchmark on 5000 perturbed cases shows that the learned warm start reduces
 - `case300`
 - `case118_api`
 - `case118_sad`
-- `case118_api`
-- `case118_sad`
+
 
 ## Installation
-## Installation
 
-Install the main dependencies:
 Install the main dependencies:
 
 ```bash
 uv sync
 ```
-
-Install development dependencies:
 Install development dependencies:
 
 ```bash
 uv sync --group dev
 ```
 
-## Basic workflow
-
-List available benchmark cases:
-
-```bash
-uv run ml_acopf list-networks
-```
 ## Basic workflow
 
 List available benchmark cases:
@@ -93,7 +83,6 @@ uv run ml_acopf generate-cases --config configs/default.toml
 ```
 
 Run a basic hyperparameter search:
-Run a basic hyperparameter search:
 
 ```bash
 uv run ml_acopf search \
@@ -101,7 +90,6 @@ uv run ml_acopf search \
   --out outputs/search
 ```
 
-Train a model:
 Train a model:
 
 ```bash
@@ -111,20 +99,13 @@ uv run ml_acopf train \
 ```
 
 Enable supervised pretraining if desired (disabled by default):
-Enable supervised pretraining if desired (disabled by default):
 
 ```bash
 uv run ml_acopf train \
   --config configs/default.toml \
   --out outputs/models \
   --pretrain
-uv run ml_acopf train \
-  --config configs/default.toml \
-  --out outputs/models \
-  --pretrain
 ```
-
-Benchmark flat, PF, and learned warm starts:
 
 Benchmark flat, PF, and learned warm starts:
 
@@ -145,20 +126,8 @@ Create benchmark plots for a saved benchmark file:
 ```bash
 uv run ml_acopf plot-benchmark \
   outputs/results/<run_name>/<run_name>_benchmark.parquet
-uv run ml_acopf plot-benchmark \
-  outputs/results/<run_name>/<run_name>_benchmark.parquet
 ```
 
-## Output layout
-
-### Generated datasets
-Case generation writes to:
-
-```bash
-data/<data.name>/baseline/
-```
-
-Layout:
 ## Output layout
 
 ### Generated datasets
@@ -179,6 +148,7 @@ Layout:
 - `buses_static.parquet` – static bus graph features
 - `edges_static.parquet` – static edge graph features
 - `device_metadata.parquet` – static device features / bounds
+
 
 ### Training outputs
 Training writes to:
@@ -215,54 +185,8 @@ Layout:
 
 
 ## TO-DO
-- [ ] case 300 test
-- [ ] add method that predicts full solver state, not only primal variables
-- [ ] time-series scenario generation
-- `cases.parquet` – converged case metadata
-- `attempted_cases.parquet` – all attempted cases
-- `load_inputs.parquet` – per-load perturbed inputs for converged cases
-- `attempted_load_inputs.parquet` – per-load perturbed inputs for all attempts
-- `bus_targets.parquet` – per-bus solved OPF targets
-- `dispatch_targets.parquet` – per-device solved OPF targets
-- `buses_static.parquet` – static bus graph features
-- `edges_static.parquet` – static edge graph features
-- `device_metadata.parquet` – static device features / bounds
 
-### Training outputs
-Training writes to:
-
-```bash
-outputs/models/<run_name>/
-```
-
-Layout:
-
-- `agent_ppo.pt`
-- `ppo_history.parquet`
-- `pretrain_history.parquet` (if pretraining is enabled)
-- training plots as PNG files
-
-Search runs write to:
-
-```bash
-outputs/search/<run_name>/
-```
-
-### Benchmark outputs
-Benchmarking writes to:
-
-```bash
-outputs/results/<run_name>/
-```
-
-Layout:
-
-- `<run_name>_benchmark.parquet`
-- `<run_name>_benchmark_summary.parquet`
-- benchmark plots as PNG files
-
-
-## TO-DO
-- [ ] case 300 test
+- [ ] refactor the learning module and create an interface to allow for multple warm start methods
+- [ ] case 300 tests
 - [ ] add method that predicts full solver state, not only primal variables
 - [ ] time-series scenario generation

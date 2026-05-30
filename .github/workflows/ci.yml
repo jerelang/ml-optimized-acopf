@@ -25,4 +25,4 @@ jobs:
             - name: Type check
               run: uv run basedpyright
             - name: Tests
-              run: uv run pytest -q --ignore=tests/test_data_pipeline.py
+              run: uv run pytest -q

@@ -76,6 +76,15 @@ class PPOAgent:
         *,
         device: torch.device | None = None,
     ) -> None:
+        """Actor-critic PPO agent.
+
+        Each graph case is treated as an independent one-step decision problem:
+        the policy proposes one normalized warm start, the solver is run once,
+        and the resulting immediate reward is used for the PPO update.
+        Even though this is PPO, the problem setting is essentially a contextual bandit,
+        as after each action, a whole new perturbed case is sampled. As such,
+        there is no dependency between the successing states.
+        """
         self.actor = actor
         self.critic = critic
         self.config = config
@@ -90,6 +99,7 @@ class PPOAgent:
             lr=config.learning_rate,
         )
 
+    # Exploration decays over rollout steps
     def decay_action_std(self) -> None:
         self.rollout_steps += 1
         if self.rollout_steps % self.config.action_std_decay_every_steps != 0:
@@ -100,6 +110,13 @@ class PPOAgent:
         )
 
     def act(self, data: Data, *, stochastic: bool = True) -> tuple[WarmStartAction, float, float]:
+        """Generate one normalized warm-start action for the graph case.
+
+        If ``stochastic`` is true, the action is sampled from the actor's
+        Gaussian policy with the current fixed exploration std. Otherwise, the
+        deterministic policy mean is returned. The method also returns the joint
+        log-probability of the chosen action and the critic value estimate.
+        """
         self.actor.eval()
         self.critic.eval()
 
@@ -151,6 +168,13 @@ class PPOAgent:
         )
 
     def update(self, buffer: RolloutBuffer) -> dict[str, float]:
+        """Run one PPO update from a buffer of case solves.
+
+        The stored node- and device-level actions are evaluated under the
+        current policy, pooled to graph-level log-probabilities, and used to
+        compute clipped PPO policy updates. Advantages are calculated from immediate
+        rewards and critic estimates.
+        """
         if not buffer.items:
             return {
                 "loss": 0.0,

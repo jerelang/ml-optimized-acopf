@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import cache
-from pathlib import Path
+from importlib.resources import as_file, files
 
 import polars as pl
 from pandapower.auxiliary import pandapowerNet
@@ -18,7 +18,7 @@ CASE_FILES: dict[str, str] = {
     "case118_api": "pglib_opf_case118_ieee_api.m",
 }
 
-PGLIB_ROOT = Path(__file__).resolve().parents[3] / "pglib-opf"
+RESOURCE_PACKAGE = "ml_acopf.resources"
 
 
 def _empty_bus_frame() -> pl.DataFrame:
@@ -67,33 +67,37 @@ def list_supported_networks() -> tuple[str, ...]:
 
 
 def build_network(name: str) -> pandapowerNet:
+    """Load a supported MATPOWER PGLib-OPF case from resources as a pandapower network."""
     try:
         filename = CASE_FILES[name]
     except KeyError as error:
         available = ", ".join(list_supported_networks())
         raise ValueError(f"Unknown network {name!r}. Available networks: {available}.") from error
 
-    path = PGLIB_ROOT / filename
-    print(path)
-    if not path.exists():
-        raise FileNotFoundError(f"PGLib case file not found: {path}")
+    resource = files(RESOURCE_PACKAGE).joinpath("pglib_opf", filename)
+    with as_file(resource) as path:
+        net = from_mpc(str(path), validate_conversion=False)
 
-    net = from_mpc(str(path), validate_conversion=False)
+    # Because of a current bug in importing MATPOWER cases, the external grids must be set to
+    # controllable manually.
+    # This preserves the intended opf limits, otherwise an unrelated setpoint is forced.
+    # Without this, even small cases like case30 become unsolvable.
     if len(net.ext_grid) > 0:
         net.ext_grid["controllable"] = True
-    # if len(net.gen) > 0:
-    #     net.gen["controllable"] = True
-    # if len(net.sgen) > 0:
-    #     net.sgen["controllable"] = True
     return net
 
 
+# Cached to avoid building more than once
 @cache
 def network_template(name: str) -> pandapowerNet:
     return build_network(name)
 
 
 def export_static_tables(net: pandapowerNet) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Export static bus and edge tables used to build graph inputs.
+    The returned tables contain fixed network attributes, but
+    no case-specific loads, dispatch values, or solver outputs.
+    """
     buses = (
         pl.from_pandas(net.bus.reset_index().rename(columns={"index": "bus_index"})).select(
             pl.col("bus_index").cast(pl.Int64),

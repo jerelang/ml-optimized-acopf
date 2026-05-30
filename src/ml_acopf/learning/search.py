@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from abc.collections import Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
@@ -100,7 +100,6 @@ def search(config: Path, out: Path, device: torch.device, pretrain: bool = False
         case_source="converged",
     )
 
-    # print(message=device)
     run_name = make_run_name(cfg)
     output_dir = out / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +220,10 @@ def search(config: Path, out: Path, device: torch.device, pretrain: bool = False
             entropy_weight=entropy_weight,
             ppo_epochs=cfg.ppo.ppo_epochs,
             max_grad_norm=cfg.ppo.max_grad_norm,
+            action_std_init=cfg.ppo.action_std_init,
+            action_std_decay_rate=cfg.ppo.action_std_decay_rate,
+            action_std_decay_every_steps=cfg.ppo.action_std_decay_every_steps,
+            action_std_min=cfg.ppo.action_std_min,
         )
 
         agent, history = train_ppo(
@@ -271,7 +274,7 @@ def search(config: Path, out: Path, device: torch.device, pretrain: bool = False
                 update={
                     "model": cfg.model.model_copy(
                         update={
-                            "hidden_channels": "-".join(str(v) for v in hidden_channels),
+                            "hidden_channels": hidden_channels,
                         }
                     ),
                     "ppo": cfg.ppo.model_copy(

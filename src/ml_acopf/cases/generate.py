@@ -20,8 +20,6 @@ from ..solver.solver import solve_ac_opf
 from ..utils import make_case_id, write_parquet
 from .networks import build_network, export_static_tables
 
-# Load Perturbation
-
 LOAD_SCHEMA = pl.Schema(
     {
         "case_id": pl.String(),
@@ -44,6 +42,8 @@ class BusLoadProfile:
     total_q_mvar: float
 
 
+# Load perturbation similar to
+# Azad Deihim et al., _Initial estimate of AC optimal power flow with graph neural networks_
 def sample_bus_load_profile(
     net: pandapowerNet,
     rng: np.random.Generator,
@@ -53,6 +53,11 @@ def sample_bus_load_profile(
     local_load_noise_scale: float = 0.05,
     reactive_noise_scale: float = 0.05,
 ) -> BusLoadProfile:
+    """Sample a perturbed bus-level load profile from a base network.
+    THe perturbation is similar to Azad Deihim et al's approach:
+    A global load scale is combined with local multiplicative noise, then
+    reactive demand is derived from the base q/p ratio with additional noise.
+    """
     if len(net.load) == 0:
         raise ValueError("No loads to sample from.")
     grouped = (
@@ -121,6 +126,8 @@ def apply_bus_load_profile(
     net: pandapowerNet,
     profile: BusLoadProfile,
 ) -> pandapowerNet:
+    """Return a deep-copied network with the given bus load profile applied.
+    This is used for generating cases"""
     net_copy = copy.deepcopy(net)
 
     if len(net_copy.load) == 0 or profile.bus_index.size == 0:
@@ -163,6 +170,10 @@ def apply_bus_load_profile(
 
 
 def apply_load_inputs(net: pandapowerNet, load_inputs: pl.DataFrame) -> pandapowerNet:
+    """Apply previously exported per-load inputs to a network in place.
+    This mutates the provided pandapower network and is used during training for quickly applying
+    the load inputs in the offline datasets
+    """
     if len(net.load) == 0 or load_inputs.is_empty():
         return net
 
@@ -236,6 +247,10 @@ def _write_generation_stats(dataset_dir: Path, stats: dict[str, object]) -> None
 
 
 def generate_cases(cfg: Config) -> dict[str, object]:
+    """Generate perturbed AC-OPF cases and write the artifacts to disk.
+    Both attempted and converged cases are recorded, together with static
+    graph tables and solved OPF targets for converged cases.
+    """
     dataset_dir = cfg.dataset_root / "baseline"
 
     base_net = build_network(cfg.data.network_name)

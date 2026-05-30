@@ -80,6 +80,16 @@ def run_benchmark(
     max_voltage_angle_deg: float = 60.0,
     out: Path | None = None,
 ) -> pl.DataFrame:
+    """Benchmark enabled warm-start methods on the same newly generated AC-OPF cases.
+
+    For each sampled case, evaluates the selected baselines (`flat`, `pf`) and an
+    optional learned predictor on the same perturbed network state.
+
+    `prep_time_s` measures only warm-start preparation:
+    - flat: 0
+    - pf: power-flow solve plus warm-start extraction
+    - predictor: graph construction + inference
+    """
     unique_network_names = tuple(dict.fromkeys(network_names))
     if not unique_network_names:
         raise ValueError("network_names must not be empty.")

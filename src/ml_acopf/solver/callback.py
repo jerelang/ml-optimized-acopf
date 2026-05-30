@@ -13,6 +13,10 @@ from .io import WarmStartPayload
 def make_pp_to_pm_callback(
     payload: WarmStartPayload,
 ) -> Callable[[object, object, dict[str, Any]], None]:
+    """
+    Construct the callback to PowerModels required to pass thorugh the warm start values.
+    """
+
     def callback(
         net: object,
         ppci: object,
@@ -50,7 +54,7 @@ def _inject_bus_starts(pm: dict[str, Any], frame: pl.DataFrame) -> None:
 
         lookup[int(row["bus_index"])] = (
             float(vm_pu),
-            math.radians(float(va_degree)),
+            math.radians(float(va_degree)),  # PowerModels needs radians
         )
 
     for bus in _pm_component_values(pm, "bus"):

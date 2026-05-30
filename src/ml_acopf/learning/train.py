@@ -45,6 +45,14 @@ def evaluate_warmstart_action(
     normalized_action: WarmStartAction,
     nonconvergence_penalty: float = 10.0,
 ) -> WarmStartStep:
+    """Evaluate one normalized warm-start action on a dataset case.
+
+    The cached network template is deep-copied, the previously stored load
+    inputs are applied, the normalized bus/device action is denormalized
+    into physical values, and the resulting warm start is passed to the
+    AC-OPF solver. The solver outcome is converted into an immediate reward
+    and returned with additional statistics.
+    """
     metadata = dataset.case_metadata(case_index)
     graph = dataset[case_index]
 
@@ -104,6 +112,8 @@ def pretrain_actor_supervised(
     learning_rate: float = 1e-3,
     weight_decay: float = 0.0,
 ) -> list[dict[str, float]]:
+    """Supervised pretraining of the actor GNN to directly predict the warm start targets,
+    with the hopes of providing a better start for the PPO algorithm."""
     actor.to(device)
 
     optimizer = torch.optim.Adam(
@@ -188,6 +198,14 @@ def train_ppo(
     nonconvergence_penalty: float = 10.0,
     seed: int = 0,
 ) -> tuple[PPOAgent, list[dict[str, float]]]:
+    """Train the actor-critic pair with PPO on independently sampled OPF cases.
+
+    Each rollout step samples one stored dataset case, proposes a warm start,
+    solves the corresponding AC-OPF once, and stores the resulting
+    one-step transition in the rollout buffer. Returns the trained agent
+    and a training history of rewards, solve times, success rates, and
+    optimization losses.
+    """
     agent = PPOAgent(
         actor=actor,
         critic=critic,
@@ -233,7 +251,7 @@ def train_ppo(
             success_values.append(1.0 if step.success else 0.0)
             solve_times.append(step.solver_time_s or step.wall_time_s)
             rollout_bar.set_postfix(
-                reward=f"{step.reward:.3f}",
+                 reward=f"{step.reward:.3f}",
                 success=step.success,
             )
             agent.decay_action_std()
@@ -277,6 +295,12 @@ def evaluate_policy(
     *,
     nonconvergence_penalty: float = 10.0,
 ) -> ValidationMetrics:
+    """Evaluate the policy of an actor on all cases in a dataset.
+
+    For each case, the actor output is used directly as the normalized warm
+    start mean. The resulting rewards
+    and solver statistics are aggregated over the full dataset.
+    """
     actor = actor.to(device)
     actor.eval()
 

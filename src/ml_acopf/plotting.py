@@ -105,7 +105,9 @@ def plot_benchmark_results(benchmark_file: Path | str) -> list[Path]:
     )
     outputs.append(total_p90_time_path)
 
-    total_median_time_path = benchmark_path.with_name(f"{benchmark_path.stem}total_time_median.png")
+    total_median_time_path = benchmark_path.with_name(
+        f"{benchmark_path.stem}_total_time_median.png"
+    )
     _plot_grouped_bar(
         summary,
         value_column="total_time_s_median",
@@ -137,7 +139,7 @@ def plot_benchmark_results(benchmark_file: Path | str) -> list[Path]:
     outputs.append(violin_path)
 
     dist_path = benchmark_path.with_name(f"{benchmark_path.stem}_total_time_dist.png")
-    _plot_boxplot_by_group(
+    _plot_dist(
         frame,
         value_column="total_time_s",
         ylabel="total time [s]",
@@ -212,15 +214,8 @@ def _plot_dist(
 ) -> None:
     df = summary.to_pandas()
     fig, ax = plt.subplots()
-    sns.barplot(
-        data=df,
-        x="method",
-        y=value_column,
-        ax=ax,
-    )
-    sns.displot(df, x=value_column, hue="method", ax=ax, fill=True, bins=100, log_scale=True)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
+    ax = sns.displot(data=df, x="total_time_s", hue="method", fill=True, bins=100, log_scale=True)
+    ax.set(ylabel=ylabel, title=title)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)

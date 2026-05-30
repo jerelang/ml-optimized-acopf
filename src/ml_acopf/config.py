@@ -6,9 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-NetworkName = Literal[
-    "case14", "case30", "case57", "case118", "case300", "case118_api", "case118_sad"
-]
+NetworkName = Literal["case14", "case30", "case118", "case300", "case118_api", "case118_sad"]
 OpfFlowLimit = Literal["S", "I"]
 
 

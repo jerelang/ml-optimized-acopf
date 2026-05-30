@@ -216,5 +216,5 @@ build/
 dist/
 *.egg-info/
 .juliapkg/**/*
-pglib-opf/
 *.ipynb
+outputs/**

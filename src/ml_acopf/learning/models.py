@@ -61,6 +61,7 @@ class VoltageWarmStartActor(nn.Module):
         dropout: float = 0.0,
         device_type_embedding_dim: int = 8,
     ) -> None:
+        """Graph neural network that predicts normalized bus and device warm-start means."""
         super().__init__()
         widths = tuple(hidden_channels)
         self.encoder = GNNEncoder(
@@ -124,6 +125,7 @@ class VoltageWarmStartCritic(nn.Module):
         hidden_channels: Sequence[int],
         dropout: float = 0.0,
     ) -> None:
+        """Graph neural network that predicts a scalar value estimate for one OPF case."""
         super().__init__()
 
         widths = tuple(hidden_channels)
