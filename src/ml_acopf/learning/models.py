@@ -67,7 +67,7 @@ class VoltageWarmStartActor(nn.Module):
         self.encoder = GNNEncoder(
             in_channels=in_channels,
             hidden_channels=widths,
-            dropout=dropout,
+            dropout=dropout, 
         )
         last_hidden = widths[-1]
         self.bus_head = nn.Linear(last_hidden, 2)
@@ -160,7 +160,7 @@ class WarmStartPredictor:
     def predict(self, graph: Data, case_id: str) -> WarmStartPayload:
         self.model.eval()
         graph = graph.to(self.device)
-
+        
         with torch.no_grad():
             normalized = self.model(
                 graph.x,

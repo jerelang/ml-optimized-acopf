@@ -289,11 +289,7 @@ class PPOAgent:
             value_loss = F.mse_loss(values, rewards)
             entropy_bonus = graph_entropy.mean()
 
-            loss = (
-                policy_loss
-                + self.config.value_loss_weight * value_loss
-                - self.config.entropy_weight * entropy_bonus
-            )
+            loss = policy_loss + self.config.value_loss_weight * value_loss
 
             self.optimizer.zero_grad()
             loss.backward()

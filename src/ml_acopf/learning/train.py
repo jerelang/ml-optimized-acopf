@@ -55,7 +55,7 @@ def evaluate_warmstart_action(
     """
     metadata = dataset.case_metadata(case_index)
     graph = dataset[case_index]
-
+ 
     net = copy.deepcopy(network_template(metadata.network_name))
     apply_load_inputs(net, dataset.load_inputs_for_case(metadata.case_id))
 
