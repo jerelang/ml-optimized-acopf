@@ -19,8 +19,8 @@ So far, this repo implements:
 Benchmark results on **`PGLib-OPF case118`** and **`case14`**, using **paper-inspired** PPO + GNN settings based on **Deihim et al.**, using **PandaModels/PowerModels + Ipopt** instead of the original **PyPower** solver stack.
 
 Exact configs for the runs shown here:
-- [`configs/paper_case14_ppo.toml`](configs/paper_case14_ppo.toml)
-- [`configs/paper_case118_ppo.toml`](configs/paper_case118_ppo.toml)
+- [`configs/case14_ppo.toml`](configs/case14_ppo.toml)
+- [`configs/case118_ppo.toml`](configs/case118_ppo.toml)
 
 
 | Network | Method | Mean total time [s] | P90 total time [s] | Median total time [s] |
@@ -182,11 +182,3 @@ Layout:
 - `<run_name>_benchmark.parquet`
 - `<run_name>_benchmark_summary.parquet`
 - benchmark plots as PNG files
-
-
-## TO-DO
-
-- [ ] refactor the learning module and create an interface to allow for multple warm start methods
-- [ ] case 300 tests
-- [ ] add method that predicts full solver state, not only primal variables
-- [ ] time-series scenario generation

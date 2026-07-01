@@ -118,7 +118,6 @@ class WarmStartDataset(Dataset[Data]):
 
         buses_static = self.tables.buses_static.sort("bus_index")
         edges_static = self.tables.edges_static
-        self._angle_bounds = _symmetric_angle_bounds(max_voltage_angle_deg)
 
         shared_device_metadata = (
             self.tables.device_metadata if not self.tables.device_metadata.is_empty() else None
@@ -157,10 +156,6 @@ class WarmStartDataset(Dataset[Data]):
         if not self._graphs or self._graphs[0].x is None:
             raise ValueError("Dataset is empty.")
         return int(self._graphs[0].x.size(-1))
-
-    @property
-    def angle_bounds(self) -> tuple[float, float]:
-        return self._angle_bounds
 
 
 def build_graph_data_from_case(

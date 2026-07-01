@@ -214,7 +214,7 @@ def _plot_dist(
 ) -> None:
     df = summary.to_pandas()
     fig, ax = plt.subplots()
-    ax = sns.displot(data=df, x="total_time_s", hue="method", fill=True, bins=100, log_scale=True)
+    sns.displot(data=df, x="total_time_s", hue="method", fill=True, bins=100, log_scale=True, ax=ax)
     ax.set(ylabel=ylabel, title=title)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
