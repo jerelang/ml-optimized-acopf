@@ -218,4 +218,3 @@ dist/
 .juliapkg/**/*
 *.ipynb
 outputs/**
-CLAUDE.md

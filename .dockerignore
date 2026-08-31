@@ -1,0 +1,34 @@
+# VCS / tooling
+.git
+.gitattributes
+.gitignore
+.github
+.pre-commit-config.yaml
+**/.DS_Store
+.env
+
+# Python
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Julia local state (spec files stay in context!)
+.juliapkg
+
+# Data & results
+data
+outputs
+digest.txt
+
+# Notebooks / docs / tests
+**/*.ipynb
+**/.ipynb_checkpoints
+docs
+tests
+
+# Docker
+Dockerfile
+.dockerignore
